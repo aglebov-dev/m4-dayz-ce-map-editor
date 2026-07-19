@@ -40,6 +40,7 @@ class LightMainWindow(MainWindow):
             self.setWindowIcon(QIcon(icon_path))
 
         self.setMinimumSize(640, 400)            # лёгкое окно свободно сжимается
+        self.diff_panel.snapshot_requested.connect(self.diff_with_snapshot)  # дифф со снапшотом
         self._add_project_buttons()
         self._map_dock_buttons()
         self._light_layout_setup()
@@ -221,10 +222,26 @@ class LightMainWindow(MainWindow):
         self.apply_gating()
         self.button_bi_export.setEnabled(True)
         self.button_reload.setEnabled(True)
-        self.button_snapshot.setEnabled(self.project.has_snapshot())
+        has_snapshot = self.project.has_snapshot()
+        self.button_snapshot.setEnabled(has_snapshot)
         self.button_save.setEnabled(True)        # карта загружена
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
+        # Дифф: кнопка «Со снапшотом» + сразу подгружаем дифф со снапшотом (если он есть)
+        self.diff_panel.set_snapshot_available(has_snapshot)
+        if has_snapshot:
+            self.diff_with_snapshot(raise_dock=False)
         return True
+
+    def diff_with_snapshot(self, raise_dock: bool = True):
+        """Сравнить текущую карту со снапшотом проекта (исходным состоянием при создании)."""
+        if not self.project or not self.project.has_snapshot():
+            self.diff_panel.show_error("У проекта нет снапшота")
+            return
+        snapshot_dir = P.snapshot_mission_dir(self.project)
+        if not snapshot_dir:
+            self.diff_panel.show_error("Снапшот пуст")
+            return
+        self.load_diff(os.path.join(snapshot_dir, "areaflags.map"), raise_dock=raise_dock)
 
     def reload_project(self):
         """Перечитать локальные файлы проекта (последнее сохранение на диске); сбрасывает

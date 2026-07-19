@@ -903,7 +903,7 @@ class MainWindow(QMainWindow):
         if p:
             self.load_diff(p)
 
-    def load_diff(self, path: str):
+    def load_diff(self, path: str, raise_dock: bool = True):
         self.on_diff_clear()
         folder = os.path.dirname(path)
         if not os.path.isfile(os.path.join(folder, "cfglimitsdefinition.xml")):
@@ -923,8 +923,9 @@ class MainWindow(QMainWindow):
             self.diff_panel.show_error(tr("diff.error", err=e))
             return
         self.diff_panel.show_diff(d, os.path.basename(folder) or folder)
-        self.dock_diff.show()
-        self.dock_diff.raise_()
+        if raise_dock:                           # авто-дифф при загрузке дока не поднимает
+            self.dock_diff.show()
+            self.dock_diff.raise_()
 
     def on_diff_flag(self, key: str):
         """Оверлей различий одного флага поверх карты."""

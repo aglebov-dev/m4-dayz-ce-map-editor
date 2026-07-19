@@ -15,21 +15,27 @@ from ui.overlays import DIFF_ADDED, DIFF_REMOVED
 
 
 class DiffPanel(QWidget):
-    """Сигналы: load_requested() — выбрать второй срез;
-    flag_clicked(key) — показать дифф флага на карте; clear_requested()."""
+    """Сигналы: snapshot_requested() — сравнить со снапшотом проекта;
+    load_requested() — выбрать другой areaflags.map; flag_clicked(key) — дифф флага
+    на карте; clear_requested()."""
 
+    snapshot_requested = Signal()
     load_requested = Signal()
     flag_clicked = Signal(str)
     clear_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.btn_snapshot = QPushButton(tr("diff.snapshot"))
+        self.btn_snapshot.clicked.connect(self.snapshot_requested)
+        self.btn_snapshot.setEnabled(False)      # включается при наличии снапшота
         self.btn_load = QPushButton(tr("diff.load"))
         self.btn_load.clicked.connect(self.load_requested)
         self.btn_clear = QPushButton(tr("diff.clear"))
         self.btn_clear.clicked.connect(self.clear_requested)
         self.btn_clear.setEnabled(False)
         top = QHBoxLayout()
+        top.addWidget(self.btn_snapshot)
         top.addWidget(self.btn_load, 1)
         top.addWidget(self.btn_clear)
 
@@ -68,6 +74,10 @@ class DiffPanel(QWidget):
         lay.addWidget(self.lbl)
         lay.addWidget(self.legend)
         lay.addWidget(self.tbl, 1)
+
+    def set_snapshot_available(self, available: bool):
+        """Кнопка «Со снапшотом» активна только при наличии снапшота у проекта."""
+        self.btn_snapshot.setEnabled(available)
 
     def clear(self):
         self.lbl.setText(tr("diff.hint"))
