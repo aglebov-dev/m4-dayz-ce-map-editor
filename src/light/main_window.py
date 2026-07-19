@@ -13,7 +13,6 @@ from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
 )
 from light import project as P
-from light.config_dialog import ProjectConfigDialog
 from light.gating import missing_for, tool_ok
 from ui.main_window import MainWindow
 
@@ -182,9 +181,11 @@ class LightMainWindow(MainWindow):
     # ---------- проект ----------
 
     def open_project_dialog(self):
-        dlg = ProjectConfigDialog(self, existing=self.project)
-        if dlg.exec() and dlg.result_project:
-            self.open_project(dlg.result_project)
+        # «Открыть проект» из редактора — то же приветственное окно, что и при старте
+        from light.welcome_window import WelcomeWindow
+        welcome = WelcomeWindow(self)
+        if welcome.exec() and welcome.result_project:
+            self.open_project(welcome.result_project)
 
     def open_project(self, proj: P.Project) -> bool:
         """Открыть проект. True — карта загружена; False — карты нет / файл повреждён
