@@ -48,6 +48,7 @@ from ui.app_bus import AppBus
 from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
+from ui.objects_presenter import ObjectsPresenter
 from common.buildings import BuildingsModel
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
@@ -168,16 +169,17 @@ class MainWindow(QMainWindow):
             mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
         self.layers_panel = self.layers.panel        # алиас для смежного кода (кисть/инспектор)
         self.dock_layers = self.layers.dock          # для реестра доков и расстановки
-        self._layers_built: set[str] = set()         # оверлеи ОБЪЕКТОВ (obj:) — лениво здесь
 
-        # панель объектов — отдельным доком под слоями (по умолчанию пополам)
-        self.objects_layers = ObjectsLayersPanel(self)
-        self.objects_layers.layer_toggled.connect(self.on_layer_toggled)
-        self.objects_layers.color_clicked.connect(self.on_layer_color_clicked)
-        self.objects_layers.opacity_changed.connect(self.on_opacity_changed)
-        self.dock_obj_layers = QDockWidget(tr("layers.objects"), self)
-        self.dock_obj_layers.setObjectName("dock_obj_layers")
-        self.dock_obj_layers.setWidget(self._dock_widget(self.objects_layers))
+        # === фича «Объекты» (obj-слои + инспектор объектов + спавн): ui/objects_presenter.py ===
+        self.objects = ObjectsPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
+        self.objects_layers = self.objects.obj_layers    # алиасы (on_items_selection/stats/light)
+        self.objects_panel = self.objects.inspector_panel
+        self.loot_panel = self.objects.loot_panel
+        self.dock_obj_layers = self.objects.dock_layers
+        self.dock_objects = self.objects.dock_inspector
+        self.dock_loot = self.objects.dock_loot
 
         # территории животных (круги из env/*_territories.xml)
         self.territories_panel = TerritoriesPanel(self)
@@ -203,23 +205,6 @@ class MainWindow(QMainWindow):
         self.dock_inspector = self.inspector.dock
         # клик по карте обслуживает и инспектор слоёв, и объектов — общий диспетчер
         self.view.clicked_world.connect(self.on_map_clicked)
-
-        # инспектор объектов — вкладкой в одном пространстве с инспектором слоёв
-        self.objects_panel = ObjectsInspectorPanel(self)
-        self.objects_panel.sw_active.toggled.connect(self.on_objects_toggled)
-        self.objects_panel.layer_toggle_requested.connect(
-            lambda key, v: self.layers_panel.row(key).btn.setChecked(v))
-        # фича «Инспектор объектов» слушает шину слоёв (источник: ui/layers_presenter.py)
-        self.bus.layer_toggled.connect(self.objects_panel.update_layer_state)
-        self.dock_objects = QDockWidget(tr("dock.inspector_objects"), self)
-        self.dock_objects.setObjectName("dock_objects")
-        self.dock_objects.setWidget(self._dock_widget(self.objects_panel))
-
-        # панель спавна: что может лежать в выбранном здании
-        self.loot_panel = LootPanel(self)
-        self.dock_loot = QDockWidget(tr("dock.loot"), self)
-        self.dock_loot.setObjectName("dock_loot")
-        self.dock_loot.setWidget(self._dock_widget(self.loot_panel))
 
         # панель статистики: площади флагов по карте / по выделенной области
         self.stats_panel = StatsPanel(self)
@@ -573,13 +558,10 @@ class MainWindow(QMainWindow):
         self.view.clear_territories()
         self.territories_panel.clear()
         self._terr_colors.clear()
-        self.objects_panel.clear()
-        self.loot_panel.clear()
         self.items_panel.clear()
         self.view.clear_overlays()
-        self._layers_built.clear()               # оверлеи объектов
         self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
-        self.objects_layers.clear()
+        self.objects.clear()                     # obj-слои + инспектор объектов + спавн
         self.zones.clear()
         self.view.clear_region()                 # выделение принадлежит прошлой карте
         self.stats_panel.clear()
@@ -617,15 +599,10 @@ class MainWindow(QMainWindow):
         self.bld_eff_u = model.eff_u if model else None
         self.bld_eff_v = model.eff_v if model else None
         self.types = model.types if model else None
-        objects = []
-        if model:
-            if self.types is not None:
-                self.items_panel.populate(self.types)
-            for key, name, count in model.layer_summary(af):
-                display = tr("layers.no_flags") if name is None else name
-                objects.append((key, display, self.layer_color(key), count))
+        if model and self.types is not None:
+            self.items_panel.populate(self.types)
         self.layers.populate(af)                 # презентер сам считает counts и цвета
-        self.objects_layers.populate(objects)
+        self.objects.populate(af, model)         # obj-слои: счётчики из модели, цвета из common
         self._load_territories(m)
         self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
                                   + [(f"usage:{n}", n) for n in af.usages])
@@ -637,50 +614,18 @@ class MainWindow(QMainWindow):
             self.lbl_af.setText(tr("af.v1"))
 
     def on_opacity_changed(self, prefix: str, v: int):
-        if prefix == "obj:":
-            self.view.set_buildings_opacity(v / 100.0)
-        elif prefix == "terr:":
+        # obj: -> ObjectsPresenter, tier/usage -> LayersPresenter; здесь только территории
+        if prefix == "terr:":
             self.view.set_territory_opacity(v / 100.0)
-        else:
-            self.view.set_overlay_opacity(v / 100.0, prefix=prefix)
 
     def layer_color(self, key: str) -> tuple[int, int, int]:
         """Совместимость: логика подбора вынесена в common.layer_colors.LayerColors."""
         return self.colors.color(key)
 
     def on_layer_toggled(self, key: str, visible: bool):
-        """Тогл слоя из панели; пиксмап строится лениво при первом включении."""
-        af = self.areaflags
-        if not af:
-            return
-        if key.startswith("obj:"):
-            if visible and self.buildings is not None and key not in self._layers_built:
-                xs, zs, sel = self._buildings_subset(key)
-                self.view.set_buildings(key, xs, zs, self.layer_color(key), indices=sel)
-                self.view.set_buildings_opacity(self.objects_layers.opacity("obj:"))
-                self._layers_built.add(key)
-            self.view.set_buildings_visible(key, visible)
-            return
+        """Тогл слоя территорий (obj: -> ObjectsPresenter, tier/usage -> LayersPresenter)."""
         if key.startswith("terr:"):
             self.view.set_territory_visible(key, visible)
-            return
-        if visible and key not in self._layers_built:
-            self._build_layer(key)
-        self.view.set_overlay_visible(key, visible)
-
-    def _build_layer(self, key: str):
-        af = self.areaflags
-        kind, name = key.split(":", 1)
-        color = self.layer_color(key)
-        if kind == "tier":
-            bit = af.values.index(name)          # z по биту: старший тир поверх
-            z = 10 + bit
-        else:
-            bit = af.usages.index(name)
-            z = 20 + bit
-        self.view.set_overlay(key, build_flag_pixmap(af, name, color), z=z,
-                              opacity=self.layers_panel.opacity(key))
-        self._layers_built.add(key)
 
     def _load_territories(self, m):
         """Круги территорий животных: слой на файл env/*_territories.xml."""
@@ -700,7 +645,7 @@ class MainWindow(QMainWindow):
 
     def on_map_clicked(self, x: float, z: float):
         want_layers = self.inspector.is_active()
-        want_objects = self.objects_panel.is_active()
+        want_objects = self.objects.is_active()
         if not (want_layers or want_objects):
             return
         m = self.current_mission()
@@ -715,23 +660,9 @@ class MainWindow(QMainWindow):
             colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
         if want_layers:
             self.inspector.show_at(x, z, af, colors, visible, water=self._water_at(x, z))
-        if want_objects and af is not None and self.buildings is not None:
-            info = self._building_nearest(x, z)
-            self.objects_panel.show_building(info, af, colors, visible)
-            # объектам точку не ставим: подсвечиваем саму отметку здания/кластер
-            self.view.set_selected_building(info["index"] if info else None)
-            # калькулятор спавна: что может лежать в этом здании
-            if info and self.types is not None:
-                self.loot_panel.show_items(info["name"],
-                                           self.buildings_model.items_for(info))
-            else:
-                self.loot_panel.clear()
+        if want_objects:
+            self.objects.show_building_at(x, z, af, colors, visible)
 
-    def _buildings_subset(self, key: str) -> tuple:
-        return self.buildings_model.subset(key, self.areaflags)
-
-    def _building_nearest(self, x: float, z: float) -> dict | None:
-        return self.buildings_model.nearest(x, z, self.areaflags)
 
     def on_items_selection(self, names: list[str]):
         """Мультивыбор в Items: объединённый слой зданий отмеченных предметов."""
@@ -1232,9 +1163,6 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self.language_changed.emit(lang)         # app.py пересоздаст окно
 
-    def on_objects_toggled(self, active: bool):
-        if not active:
-            self.view.set_selected_building(None)   # подсветка — инспектору объектов
 
     def on_layer_color_clicked(self, key: str):
         c = QColorDialog.getColor(QColor(*self.layer_color(key)), self,
@@ -1243,24 +1171,14 @@ class MainWindow(QMainWindow):
             self.apply_layer_color(key, (c.red(), c.green(), c.blue()))
 
     def apply_layer_color(self, key: str, rgb: tuple[int, int, int]):
+        """Цвет территории (obj: -> ObjectsPresenter, tier/usage -> LayersPresenter)."""
         m = self.current_mission()
         if not m:
             return
         self.settings.set_layer_color(m.name, key, rgb)
         self.settings.save()
-        if key.startswith("terr:"):
-            self.territories_panel.row(key).set_color(rgb)
-            self.view.set_territory_color(key, rgb)
-            return
-        panel = self.objects_layers if key.startswith("obj:") else self.layers_panel
-        panel.row(key).set_color(rgb)
-        if key.startswith("obj:"):
-            self.view.set_buildings_color(key, rgb)
-            return
-        if key in self._layers_built:            # перекрасить уже построенный слой
-            self._build_layer(key)               # set_overlay сохранит видимость
-        if key == self.zones_panel.layer_key:    # подписи зон — в цвете своего слоя
-            self.view.set_zone_labels_color(rgb)
+        self.territories_panel.row(key).set_color(rgb)
+        self.view.set_territory_color(key, rgb)
 
     # ---------- статус ----------
 
