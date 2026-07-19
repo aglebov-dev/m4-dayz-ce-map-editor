@@ -12,9 +12,12 @@ import os
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QDialog, QHBoxLayout, QLabel, QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
+    QComboBox, QDialog, QHBoxLayout, QLabel, QSizePolicy, QTabWidget, QVBoxLayout,
+    QWidget,
 )
 
+from core import i18n
+from core.i18n import tr
 from light.sources import SOURCES
 from light.sources.base import Availability, ProjectSource
 
@@ -22,13 +25,17 @@ _CARD_WIDTH = 720
 
 
 class WelcomeWindow(QDialog):
-    """Возвращает готовый `light.project.Project` через `.result_project` (None при отмене)."""
+    """Возвращает готовый `light.project.Project` через `.result_project` (None при отмене).
+    Если сменили язык (`.relaunch == True`) — app.py переоткрывает окно на новой локали."""
 
-    def __init__(self, parent=None, source_classes: list[type[ProjectSource]] | None = None):
+    def __init__(self, parent=None, source_classes: list[type[ProjectSource]] | None = None,
+                 settings=None):
         super().__init__(parent)
         self.setWindowTitle("M4 DayZ CE Map Editor")
         self.resize(900, 640)
         self.result_project = None
+        self.relaunch = False
+        self._settings = settings                # для смены языка (может быть None)
         self._sources: list[ProjectSource] = []
 
         # --- центрирующая раскладка: карточка по центру окна ---
@@ -71,11 +78,29 @@ class WelcomeWindow(QDialog):
             logo.setPixmap(self._sharp_icon(icon_path, 48))
             layout.addWidget(logo)
 
-        title = QLabel("<b style='font-size:16pt'>M4 DayZ CE Map Editor</b><br>"
-                       "<span style='color:gray'>Загрузка проекта</span>")
+        title = QLabel(f"<b style='font-size:16pt'>M4 DayZ CE Map Editor</b><br>"
+                       f"<span style='color:gray'>{tr('welcome.subtitle')}</span>")
         layout.addWidget(title)
         layout.addStretch(1)
+        # переключатель языка — верх-право от заголовка
+        if self._settings is not None:
+            self.cmb_lang = QComboBox()
+            self.cmb_lang.addItems(i18n.available())
+            self.cmb_lang.setCurrentText(self._settings.lang)
+            self.cmb_lang.setToolTip(tr("lang.tip"))
+            self.cmb_lang.currentTextChanged.connect(self._on_lang)
+            layout.addWidget(self.cmb_lang, 0, Qt.AlignmentFlag.AlignTop)
         return header
+
+    def _on_lang(self, lang: str) -> None:
+        """Смена языка: сохранить и переоткрыть окно на новой локали (app.py)."""
+        if not self._settings or lang == self._settings.lang:
+            return
+        self._settings.lang = lang
+        self._settings.save()
+        i18n.load(lang)
+        self.relaunch = True
+        self.reject()
 
     def _sharp_icon(self, path: str, logical_size: int):
         """Чёткий логотип из .ico: берём кадр под физический размер (logical×DPI) — Qt
@@ -94,10 +119,10 @@ class WelcomeWindow(QDialog):
         показывать недоступное» — только здесь."""
         availability = source.availability()
         if availability.ok:
-            self.tabs.addTab(source.build_widget(), source.title)
+            self.tabs.addTab(source.build_widget(), tr(source.title))
         else:
             index = self.tabs.addTab(
-                self._unavailable_placeholder(availability), source.title)
+                self._unavailable_placeholder(availability), tr(source.title))
             self.tabs.setTabEnabled(index, False)
             self.tabs.setTabToolTip(index, availability.reason)
 
@@ -105,7 +130,7 @@ class WelcomeWindow(QDialog):
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.addStretch(1)
-        label = QLabel(f"Недоступно: {availability.reason}")
+        label = QLabel(tr("welcome.unavailable", reason=availability.reason))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setWordWrap(True)
         label.setStyleSheet("color: gray;")

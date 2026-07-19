@@ -6,10 +6,12 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButton
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QDesktopServices, QIcon
 
 from core.building_index import load_index
+from core.i18n import tr
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
 )
@@ -131,8 +133,8 @@ class LightMainWindow(MainWindow):
 
         # СОХРАНИТЬ — яркая заметная кнопка слева
         self.button_save = QToolButton()
-        self.button_save.setText("save")
-        self.button_save.setToolTip("write areaflags.map")
+        self.button_save.setText(tr("toolbar.save"))
+        self.button_save.setToolTip(tr("toolbar.save_tip"))
         self.button_save.clicked.connect(self.on_save)
         self.button_save.setStyleSheet(
             "QToolButton { background:#2e7d32; color:white; font-weight:bold;"
@@ -142,23 +144,21 @@ class LightMainWindow(MainWindow):
         main_toolbar.insertWidget(first, self.button_save)
 
         self.button_open = QToolButton()
-        self.button_open.setText("Открыть проект…")
-        self.button_open.setToolTip("Открыть/настроить проект (источник, файлы, снапшот)")
+        self.button_open.setText(tr("toolbar.open_project"))
+        self.button_open.setToolTip(tr("toolbar.open_project_tip"))
         self.button_open.clicked.connect(self.open_project_dialog)
         main_toolbar.insertWidget(first, self.button_open)
 
         self.button_reload = QToolButton()
-        self.button_reload.setText("Перезагрузить проект")
-        self.button_reload.setToolTip("Перечитать проект с диска (последнее сохранение); "
-                                   "сбросит несохранённые правки")
+        self.button_reload.setText(tr("toolbar.reload_project"))
+        self.button_reload.setToolTip(tr("toolbar.reload_project_tip"))
         self.button_reload.clicked.connect(self.reload_project)
         self.button_reload.setEnabled(False)
         main_toolbar.insertWidget(first, self.button_reload)
 
         self.button_snapshot = QToolButton()
-        self.button_snapshot.setText("Откат к снапшоту")
-        self.button_snapshot.setToolTip("Вернуть проект к снапшоту (исходному состоянию при "
-                                     "создании); потеряются все правки, включая сохранённые")
+        self.button_snapshot.setText(tr("toolbar.snapshot"))
+        self.button_snapshot.setToolTip(tr("toolbar.snapshot_tip"))
         self.button_snapshot.clicked.connect(self.revert_to_snapshot)
         self.button_snapshot.setEnabled(False)
         main_toolbar.insertWidget(first, self.button_snapshot)
@@ -166,12 +166,19 @@ class LightMainWindow(MainWindow):
 
         # BI-экспорт — в общей группе с основными кнопками (а не у правого края)
         self.button_bi_export = QToolButton()
-        self.button_bi_export.setText("Экспорт в BI…")
-        self.button_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
-                                      "cfglimits + TGA-слои по флагам + проект XML")
+        self.button_bi_export.setText(tr("toolbar.bi_export"))
+        self.button_bi_export.setToolTip(tr("toolbar.bi_export_tip"))
         self.button_bi_export.clicked.connect(self.export_to_bi)
         self.button_bi_export.setEnabled(False)
         main_toolbar.insertWidget(first, self.button_bi_export)
+
+        # ПАПКА — открыть в проводнике папку с файлами текущей карты
+        self.button_folder = QToolButton()
+        self.button_folder.setText(tr("toolbar.folder"))
+        self.button_folder.setToolTip(tr("toolbar.folder_tip"))
+        self.button_folder.clicked.connect(self.open_map_folder)
+        self.button_folder.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_folder)
 
         # язык — сразу за BI (был у правого края за спейсером): всё идёт друг за другом
         lang_action = next((a for a in main_toolbar.actions()
@@ -225,6 +232,7 @@ class LightMainWindow(MainWindow):
         self._restore_project_layout()           # раскладка панелей ЭТОГО проекта (если есть)
         self.apply_gating()                      # гейтинг — после раскладки (последнее слово)
         self.button_bi_export.setEnabled(True)
+        self.button_folder.setEnabled(True)
         self.button_reload.setEnabled(True)
         has_snapshot = self.project.has_snapshot()
         self.button_snapshot.setEnabled(has_snapshot)
@@ -289,6 +297,14 @@ class LightMainWindow(MainWindow):
             if ok != QMessageBox.StandardButton.Yes:
                 return
         self.open_project(self.project)          # перечитывает data/ проекта
+
+    def open_map_folder(self):
+        """Открыть в проводнике папку с файлами текущей карты (data/ проекта)."""
+        if not self.project:
+            return
+        path = str(self.project.mission_dir)
+        if os.path.isdir(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
     def revert_to_snapshot(self):
         """Откат к снапшоту: восстановить исходное состояние проекта (каким оно было при

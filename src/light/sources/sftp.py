@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QFormLayout, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from core.i18n import tr
 from light import app_prefs
 from light.configure_panel import ConfigurePanel
 from light.providers import ProviderError, SftpProvider, sftp_available
@@ -19,12 +20,12 @@ _PREFS_KEY = "sftp_form"
 
 class SftpProjectSource(ProjectSource):
     id = "sftp"
-    title = "Импорт через SFTP"
+    title = "src.sftp"
 
     def availability(self) -> Availability:
         if sftp_available():
             return Availability.available()
-        return Availability.unavailable("не установлен paramiko (pip install paramiko)")
+        return Availability.unavailable(tr("src.sftp_no_paramiko"))
 
     def build_widget(self) -> QWidget:
         widget = QWidget()
@@ -41,15 +42,15 @@ class SftpProjectSource(ProjectSource):
         self.key_edit = QLineEdit()
         self.root_edit = QLineEdit()
         self.root_edit.setText("/")
-        form.addRow("Хост:", self.host_edit)
-        form.addRow("Порт:", self.port_spin)
-        form.addRow("Пользователь:", self.user_edit)
-        form.addRow("Пароль:", self.password_edit)
-        form.addRow("Ключ:", self.key_edit)
-        form.addRow("Папка сервера DayZ:", self.root_edit)
+        form.addRow(tr("src.sftp_host"), self.host_edit)
+        form.addRow(tr("src.sftp_port"), self.port_spin)
+        form.addRow(tr("src.sftp_user"), self.user_edit)
+        form.addRow(tr("src.sftp_password"), self.password_edit)
+        form.addRow(tr("src.sftp_key"), self.key_edit)
+        form.addRow(tr("src.sftp_root"), self.root_edit)
         layout.addLayout(form)
 
-        self.connect_button = QPushButton("Подключить")
+        self.connect_button = QPushButton(tr("src.connect"))
         self.connect_button.clicked.connect(self._connect)
         layout.addWidget(self.connect_button)
 
@@ -57,7 +58,7 @@ class SftpProjectSource(ProjectSource):
         self.panel.ready_changed.connect(self._on_ready)
         layout.addWidget(self.panel, 1)
 
-        self.create_button = QPushButton("Загрузить проект")
+        self.create_button = QPushButton(tr("src.load_project"))
         self.create_button.setEnabled(False)
         self.create_button.clicked.connect(self._create)
         layout.addWidget(self.create_button)
@@ -103,7 +104,7 @@ class SftpProjectSource(ProjectSource):
                 port=int(config["port"]), password=config["password"],
                 key_path=config["key_path"])
         except (ProviderError, KeyError, OSError) as error:
-            QMessageBox.warning(self.panel, "SFTP", f"Не удалось: {error}")
+            QMessageBox.warning(self.panel, "SFTP", tr("src.source_err", error=error))
             self.panel.clear()
             return
         self.panel.set_provider(provider, config)

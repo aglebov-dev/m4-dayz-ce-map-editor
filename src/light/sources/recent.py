@@ -8,26 +8,27 @@ from PySide6.QtWidgets import (
     QLabel, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout, QWidget,
 )
 
+from core.i18n import tr
 from light import project as P
 from light.sources.base import Availability, ProjectSource
 
 
 class RecentProjectSource(ProjectSource):
     id = "recent"
-    title = "Проекты"
+    title = "src.recent"
 
     def availability(self) -> Availability:
         """Доступен, только если есть хотя бы один сохранённый проект — иначе показывать
         пустую вкладку незачем (причину окно покажет пользователю)."""
         if P.list_projects():
             return Availability.available()
-        return Availability.unavailable("нет сохранённых проектов")
+        return Availability.unavailable(tr("src.recent_none"))
 
     def build_widget(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        layout.addWidget(QLabel("Мои карты:"))
+        layout.addWidget(QLabel(tr("welcome.recent_label")))
 
         self.list_widget = QListWidget()
         for config in P.list_projects():
@@ -41,7 +42,7 @@ class RecentProjectSource(ProjectSource):
         self.list_widget.currentItemChanged.connect(self._refresh_button)
         layout.addWidget(self.list_widget, 1)
 
-        self.open_button = QPushButton("Открыть проект")
+        self.open_button = QPushButton(tr("welcome.open_button"))
         self.open_button.clicked.connect(self._open)
         layout.addWidget(self.open_button)
 

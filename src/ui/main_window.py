@@ -1039,8 +1039,9 @@ class MainWindow(QMainWindow):
         if lang == self.settings.lang:
             return
         self.settings.lang = lang
-        self.settings.save()
-        self.language_changed.emit(lang)         # app.py пересоздаст окно
+        self.settings.save()                     # прочитается при следующем запуске
+        self.statusBar().showMessage(tr("lang.restart_hint"), 8000)
+        self.language_changed.emit(lang)
 
 
 

@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
+from core.i18n import tr
 from light import project as P
 from light.background_panel import BackgroundPanel
 from light.gating import tool_status
@@ -39,16 +40,16 @@ class ConfigurePanel(QWidget):
         # --- миссия ---
         self.mission_combo = QComboBox()
         self.mission_combo.currentIndexChanged.connect(self._on_mission)
-        mission_group = QGroupBox("Миссия")
+        mission_group = QGroupBox(tr("cfg.mission"))
         mission_layout = QVBoxLayout(mission_group)
         mission_layout.addWidget(self.mission_combo)
         layout.addWidget(mission_group)
 
         # --- имя проекта ---
         self.project_name_edit = QLineEdit()
-        self.project_name_edit.setPlaceholderText("Имя проекта")
+        self.project_name_edit.setPlaceholderText(tr("src.name_ph"))
         self.project_name_edit.textChanged.connect(self._refresh_ready)
-        name_group = QGroupBox("Проект")
+        name_group = QGroupBox(tr("cfg.project"))
         name_layout = QVBoxLayout(name_group)
         name_layout.addWidget(self.project_name_edit)
         layout.addWidget(name_group)
@@ -58,9 +59,9 @@ class ConfigurePanel(QWidget):
         self.tools_label = QLabel("")
         self.tools_label.setWordWrap(True)
         self.tools_label.setTextFormat(Qt.TextFormat.RichText)
-        files_group = QGroupBox("Файлы проекта")
+        files_group = QGroupBox(tr("cfg.files"))
         files_layout = QVBoxLayout(files_group)
-        files_layout.addWidget(QLabel("✔ загружен · ✖ отсутствует"))
+        files_layout.addWidget(QLabel(tr("cfg.legend")))
         files_layout.addWidget(self.files_list, 1)
         files_layout.addWidget(self.tools_label)
         layout.addWidget(files_group, 1)
@@ -80,10 +81,10 @@ class ConfigurePanel(QWidget):
         self.mission_combo.blockSignals(True)
         self.mission_combo.clear()
         if not self._missions:
-            self.mission_combo.addItem("миссии не найдены", None)
+            self.mission_combo.addItem(tr("cfg.no_missions"), None)
         else:
             for mission in self._missions:
-                self.mission_combo.addItem(mission or "(корень)", mission)
+                self.mission_combo.addItem(mission or tr("cfg.root"), mission)
         self.mission_combo.blockSignals(False)
         self._on_mission()
 
@@ -106,7 +107,7 @@ class ConfigurePanel(QWidget):
         for role in P.ROLES:
             present = role.key in self._files
             mark = "✔" if present else "✖"
-            required = " (обязателен)" if role.required else ""
+            required = tr("cfg.required") if role.required else ""
             item = QListWidgetItem(f"{mark}  {role.title}{required}")
             item.setForeground(Qt.GlobalColor.darkGreen if present else Qt.GlobalColor.gray)
             self.files_list.addItem(item)
@@ -123,16 +124,16 @@ class ConfigurePanel(QWidget):
 
     def _update_tools(self) -> None:
         status = tool_status(self._files)
-        names = {"map": "Карта/Слои", "objects": "Объекты", "economy": "Спавн",
-                 "territories": "Территории"}
+        names = {"map": tr("cfg.tool_map"), "objects": tr("cfg.tool_objects"),
+                 "economy": tr("cfg.tool_economy"), "territories": tr("cfg.tool_territories")}
         parts = []
         for tool, state in status.items():
             if state["ok"]:
                 parts.append(f"<span style='color:green'>✔ {names[tool]}</span>")
             else:
-                parts.append(f"<span style='color:#b26a00'>✖ {names[tool]} "
-                             f"(нет: {', '.join(state['missing'])})</span>")
-        self.tools_label.setText("Инструменты: " + " · ".join(parts))
+                miss = tr("cfg.tool_missing", missing=", ".join(state["missing"]))
+                parts.append(f"<span style='color:#b26a00'>✖ {names[tool]}{miss}</span>")
+        self.tools_label.setText(tr("cfg.tools") + " · ".join(parts))
 
     # ---------- готовность и сборка ----------
 
@@ -163,6 +164,7 @@ class ConfigurePanel(QWidget):
             P.materialize(project, self._provider)
             P.make_snapshot(project)
         except Exception as error:
-            QMessageBox.critical(self, "Проект", f"Не удалось подготовить проект: {error}")
+            QMessageBox.critical(self, tr("cfg.project"),
+                                 tr("cfg.project_err", error=error))
             return None
         return project
