@@ -49,6 +49,7 @@ from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
 from ui.objects_presenter import ObjectsPresenter
 from ui.items_presenter import ItemsPresenter
+from ui.territories_presenter import TerritoriesPresenter
 from common.buildings import BuildingsModel
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
@@ -179,21 +180,20 @@ class MainWindow(QMainWindow):
         self.dock_objects = self.objects.dock_inspector
         self.dock_loot = self.objects.dock_loot
 
-        # территории животных (круги из env/*_territories.xml)
-        self.territories_panel = TerritoriesPanel(self)
-        self.territories_panel.layer_toggled.connect(self.on_layer_toggled)
-        self.territories_panel.color_clicked.connect(self.on_layer_color_clicked)
-        self.territories_panel.opacity_changed.connect(self.on_opacity_changed)
-        self.dock_territories = QDockWidget(tr("dock.territories"), self)
-        self.dock_territories.setObjectName("dock_territories")
-        self.dock_territories.setWidget(self._dock_widget(self.territories_panel))
+        # === фича «Территории» (круги животных): ui/territories_presenter.py ===
+        self.territories = TerritoriesPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, territory_colors=self._terr_colors,
+            wrap=self._dock_widget)
+        self.territories_panel = self.territories.panel   # алиас (light прячет этот док)
+        self.dock_territories = self.territories.dock
 
         # панели информации — СПРАВА. === фича «Зоны»: вся логика в ui/zones_presenter.py ===
         self.zones = ZonesPresenter(
             self, view=self.view, colors=self.colors, bus=self.bus,
             areaflags=lambda: getattr(self, "areaflags", None),
             is_layer_visible=self.layers.is_visible, wrap=self._dock_widget)
-        self.zones_panel = self.zones.panel          # алиас (export_csv, apply_layer_color)
+        self.zones_panel = self.zones.panel          # алиас (export_csv: layer_key)
         self.dock_zones = self.zones.dock
 
         # === фича «Инспектор слоёв»: вся логика в ui/inspector_presenter.py ===
@@ -554,8 +554,7 @@ class MainWindow(QMainWindow):
         self.bld_eff_v = None
         self.view.clear_buildings()
         self.view.clear_territories()
-        self.territories_panel.clear()
-        self._terr_colors.clear()
+        self.territories.clear()
         self.items.clear()
         self.view.clear_overlays()
         self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
@@ -611,35 +610,13 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_af.setText(tr("af.v1"))
 
-    def on_opacity_changed(self, prefix: str, v: int):
-        # obj: -> ObjectsPresenter, tier/usage -> LayersPresenter; здесь только территории
-        if prefix == "terr:":
-            self.view.set_territory_opacity(v / 100.0)
-
     def layer_color(self, key: str) -> tuple[int, int, int]:
         """Совместимость: логика подбора вынесена в common.layer_colors.LayerColors."""
         return self.colors.color(key)
 
-    def on_layer_toggled(self, key: str, visible: bool):
-        """Тогл слоя территорий (obj: -> ObjectsPresenter, tier/usage -> LayersPresenter)."""
-        if key.startswith("terr:"):
-            self.view.set_territory_visible(key, visible)
-
     def _load_territories(self, m):
-        """Круги территорий животных: слой на файл env/*_territories.xml."""
-        try:
-            layers = read_territories(m.path)
-        except Exception:
-            layers = []
-        items = []
-        for tl in layers:
-            key = f"terr:{tl.name}"
-            color = self.settings.layer_color(m.name, key) or tl.color
-            self._terr_colors[key] = tl.color    # дефолт из файла (для сброса цвета)
-            self.view.set_territory(key, tl.x, tl.z, tl.r, color)
-            items.append((key, tl.name, color, tl.count))
-        self.territories_panel.populate(items)
-        self.view.set_territory_opacity(self.territories_panel.opacity("terr:"))
+        """Хук загрузки территорий (в лёгком редакторе переопределён в no-op)."""
+        self.territories.populate(m)
 
     def on_map_clicked(self, x: float, z: float):
         want_layers = self.inspector.is_active()
@@ -1147,21 +1124,6 @@ class MainWindow(QMainWindow):
         self.language_changed.emit(lang)         # app.py пересоздаст окно
 
 
-    def on_layer_color_clicked(self, key: str):
-        c = QColorDialog.getColor(QColor(*self.layer_color(key)), self,
-                                  tr("color_dlg.title", name=key.split(":", 1)[1]))
-        if c.isValid():
-            self.apply_layer_color(key, (c.red(), c.green(), c.blue()))
-
-    def apply_layer_color(self, key: str, rgb: tuple[int, int, int]):
-        """Цвет территории (obj: -> ObjectsPresenter, tier/usage -> LayersPresenter)."""
-        m = self.current_mission()
-        if not m:
-            return
-        self.settings.set_layer_color(m.name, key, rgb)
-        self.settings.save()
-        self.territories_panel.row(key).set_color(rgb)
-        self.view.set_territory_color(key, rgb)
 
     # ---------- статус ----------
 
