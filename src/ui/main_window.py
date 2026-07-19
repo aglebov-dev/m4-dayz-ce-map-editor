@@ -354,6 +354,14 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, lambda: self._stats_dirty and self.refresh_stats(now=True))
 
     def closeEvent(self, ev):
+        if getattr(self, "_dirty_cells", 0):     # несохранённые правки — спросить
+            ok = QMessageBox.question(
+                self, tr("exit.title"),
+                tr("exit.unsaved", n=f"{self._dirty_cells:,}".replace(",", " ")),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            if ok != QMessageBox.StandardButton.Yes:
+                ev.ignore()
+                return
         try:
             self.settings.data["ui_state"] = bytes(
                 self.saveState().toBase64()).decode()

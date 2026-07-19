@@ -8,9 +8,13 @@ from PySide6.QtWidgets import (
     QFormLayout, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from light import app_prefs
 from light.configure_panel import ConfigurePanel
 from light.providers import ProviderError, SftpProvider, sftp_available
 from light.sources.base import Availability, ProjectSource
+
+# ключ в app_prefs.json; пароль НЕ сохраняем
+_PREFS_KEY = "sftp_form"
 
 
 class SftpProjectSource(ProjectSource):
@@ -57,7 +61,27 @@ class SftpProjectSource(ProjectSource):
         self.create_button.setEnabled(False)
         self.create_button.clicked.connect(self._create)
         layout.addWidget(self.create_button)
+
+        self._load_prefs()                       # подставить сохранённые поля (без пароля)
         return widget
+
+    def _load_prefs(self) -> None:
+        saved = app_prefs.get(_PREFS_KEY) or {}
+        self.host_edit.setText(saved.get("host", ""))
+        self.port_spin.setValue(int(saved.get("port", 22) or 22))
+        self.user_edit.setText(saved.get("user", ""))
+        self.key_edit.setText(saved.get("key_path", "") or "")
+        self.root_edit.setText(saved.get("root", "/") or "/")
+
+    def _save_prefs(self) -> None:
+        # пароль НЕ сохраняем — только адрес подключения
+        app_prefs.set(_PREFS_KEY, {
+            "host": self.host_edit.text().strip(),
+            "port": self.port_spin.value(),
+            "user": self.user_edit.text().strip(),
+            "key_path": self.key_edit.text().strip(),
+            "root": self.root_edit.text().strip() or "/",
+        })
 
     def _provider_cfg(self) -> dict:
         return {
@@ -71,6 +95,7 @@ class SftpProjectSource(ProjectSource):
         }
 
     def _connect(self) -> None:
+        self._save_prefs()                       # запомнить поля при попытке подключения
         config = self._provider_cfg()
         try:
             provider = SftpProvider(
