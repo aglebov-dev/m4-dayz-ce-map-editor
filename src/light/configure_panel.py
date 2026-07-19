@@ -145,8 +145,11 @@ class ConfigurePanel(QWidget):
         self.ready_changed.emit(self.is_ready())
 
     def build_project(self) -> P.Project | None:
-        """Собрать проект из выбранного: материализация + снапшот. None при ошибке."""
+        """Собрать проект из выбранного: материализация + снапшот. None при ошибке или
+        если пользователь отменил создание без подложки."""
         if not self.is_ready():
+            return None
+        if not self.background_panel.confirm_or_warn(self):
             return None
         mission_name = self.mission_combo.currentData() or ""
         name = (self.project_name_edit.text().strip()

@@ -26,6 +26,7 @@ class BackgroundPanel(QGroupBox):
         self._world_size = 0
 
         self.background_combo = QComboBox()
+        self.background_combo.currentIndexChanged.connect(self._clear_warning)
         self.image_button = QPushButton(tr("bgp.pick_image"))
         self.image_button.clicked.connect(self._pick_image)
         self.game_edit = QLineEdit()
@@ -64,6 +65,23 @@ class BackgroundPanel(QGroupBox):
         """Мир (имя + метры) — нужен только для распаковки тайлов из игры."""
         self._world_name = world_name or ""
         self._world_size = int(world_size or 0)
+
+    def confirm_or_warn(self, parent) -> bool:
+        """True — можно создавать проект. Если подложка НЕ выбрана: подсветить поле и
+        спросить подтверждение (добавить подложку позже можно только правкой конфига)."""
+        if self.value():
+            self._clear_warning()
+            return True
+        self.background_combo.setStyleSheet("QComboBox { border: 1px solid #e53935; }")
+        answer = QMessageBox.warning(
+            parent, tr("bgp.none_title"), tr("bgp.none_warn"),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _clear_warning(self, *_args) -> None:
+        if self.value():
+            self.background_combo.setStyleSheet("")
 
     # ---------- внутреннее ----------
 

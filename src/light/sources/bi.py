@@ -96,6 +96,8 @@ class BiProjectSource(ProjectSource):
         self.import_button.setEnabled(True)
 
     def _import(self) -> None:
+        if not self.background_panel.confirm_or_warn(self.widget):
+            return                               # подложка не выбрана — пользователь отменил
         folder = self.folder_edit.text().strip()
         name = self.name_edit.text().strip() or "BI_project"
         try:
