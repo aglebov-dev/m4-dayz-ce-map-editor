@@ -133,7 +133,22 @@ class BackgroundPanel(QGroupBox):
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, tr("bgp.unpack_fail_title"), str(error))
             return
+        buildings = self._unpack_buildings(game)     # заодно здания (не критично)
         QApplication.restoreOverrideCursor()
         self._refresh(keep=f"tiles:{self._world_name}")
-        QMessageBox.information(self, tr("bgp.unpack_title"), tr(
-            "bgp.unpack_done", world=self._world_name, size=self._world_size))
+        message = tr("bgp.unpack_done", world=self._world_name, size=self._world_size)
+        if buildings:
+            message += "\n" + tr("bgp.buildings_done", n=buildings)
+        QMessageBox.information(self, tr("bgp.unpack_title"), message)
+
+    def _unpack_buildings(self, game: str) -> int:
+        """Заодно с подложкой собираем footprint зданий из structures*.pbo игры в
+        appdata/buildings/<world>.json (то же место — то же удобство). Ошибка не критична:
+        подложка уже распакована, здания просто не обновятся."""
+        try:
+            from core import build_buildings
+            from core.paths import paths
+            out = str(paths.buildings_cache / f"{self._world_name}.json")
+            return build_buildings.generate(game, self._world_name, out, log=lambda _m: None)
+        except Exception:
+            return 0

@@ -40,22 +40,28 @@ class BuildingIndex:
 
 
 def load_index(roots, world: str) -> BuildingIndex | None:
-    """Прочитать `<root>/<world>.json` — первый найденный среди `roots` (папка или список
-    папок; порядок = приоритет, обычно appdata → bundled). None — если датасета для мира нет."""
+    """Собрать footprint-таблицу из `<root>/<world>.json` по всем `roots` (папка или список).
+    Порядок = приоритет (обычно appdata → bundled): раньше в списке = важнее. Датасеты
+    ОБЪЕДИНЯЮТСЯ — appdata переопределяет одноимённые классы, а bundled дополняет теми, что
+    появились не в appdata. None — если ни в одном корне нет `<world>.json`."""
     if isinstance(roots, (str, Path)):
         roots = [roots]
-    path = next((Path(r) / f"{world}.json" for r in roots
-                 if (Path(r) / f"{world}.json").is_file()), None)
-    if path is None:
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return None
     footprints: dict[str, Footprint] = {}
-    for c in data.get("classes", []):
-        fp = c.get("footprint")
-        if fp:
-            footprints[c["name"]] = Footprint(fp["w"], fp["l"],
-                                              fp.get("ox", 0.0), fp.get("oz", 0.0))
-    return BuildingIndex(world, int(data.get("worldSize", 0)), footprints)
+    world_size = 0
+    found = False
+    for root in reversed(list(roots)):           # низший приоритет первым, важный поверх
+        path = Path(root) / f"{world}.json"
+        if not path.is_file():
+            continue
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        found = True
+        world_size = int(data.get("worldSize", 0)) or world_size
+        for c in data.get("classes", []):
+            fp = c.get("footprint")
+            if fp:
+                footprints[c["name"]] = Footprint(fp["w"], fp["l"],
+                                                  fp.get("ox", 0.0), fp.get("oz", 0.0))
+    return BuildingIndex(world, world_size, footprints) if found else None
