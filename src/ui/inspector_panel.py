@@ -39,7 +39,7 @@ class InspectorPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.sw_active = Switch((76, 175, 80), self)
-        self.sw_active.setChecked(True)
+        self.sw_active.setChecked(False)         # по умолчанию выключен (клик по карте не трогает)
         head = QHBoxLayout()
         head.addWidget(self.sw_active)
         head.addWidget(QLabel(tr("inspector.toggle")))
