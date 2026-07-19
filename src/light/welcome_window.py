@@ -7,14 +7,12 @@
 Вкладки собраны в карточку по центру окна («со смещением в центр»)."""
 from __future__ import annotations
 
-import os
-
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from light.app_icon import make_app_icon
 from light.sources import SOURCES
 from light.sources.base import Availability, ProjectSource
 
@@ -65,14 +63,9 @@ class WelcomeWindow(QDialog):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 8)
 
-        icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "app_icon_high.ico")
-        if os.path.exists(icon_path):
-            pixmap = QPixmap(icon_path)
-            if not pixmap.isNull():
-                logo = QLabel()
-                logo.setPixmap(pixmap.scaledToHeight(
-                    48, Qt.TransformationMode.SmoothTransformation))
-                layout.addWidget(logo)
+        logo = QLabel()
+        logo.setPixmap(make_app_icon().pixmap(48, 48))   # иконка рисуется кодом
+        layout.addWidget(logo)
 
         title = QLabel("<b style='font-size:16pt'>M4 DayZ CE Map Editor</b><br>"
                        "<span style='color:gray'>Загрузка проекта</span>")

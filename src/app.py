@@ -5,8 +5,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from PySide6.QtWidgets import QApplication
-from PySide6.QtGui import QIcon
 
+from light.app_icon import make_app_icon
 from light.main_window import LightMainWindow
 from light.welcome_window import WelcomeWindow
 
@@ -15,10 +15,8 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("m4 dayz ce map editor")
 
-    # Устанавливаем иконку приложения
-    icon_path = os.path.join(os.path.dirname(__file__), "..", "app_icon_high.ico")
-    if os.path.exists(icon_path):
-        app.setWindowIcon(QIcon(icon_path))
+    # Иконка приложения рисуется кодом (light/app_icon), не грузится с диска
+    app.setWindowIcon(make_app_icon())
 
     win = LightMainWindow()
     # при старте — приветственное окно: выбор способа загрузки проекта вкладками
