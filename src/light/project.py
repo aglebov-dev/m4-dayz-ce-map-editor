@@ -114,6 +114,16 @@ def _safe_provider(cfg: dict) -> dict:
     return out
 
 
+def new_id(name: str) -> str:
+    """Свободный id проекта из имени: только буквы/цифры, уникален среди appdata/projects."""
+    base = "".join(c if c.isalnum() else "_" for c in name)[:32] or "proj"
+    project_id, number = base, 2
+    while paths.project(project_id).is_dir():
+        project_id = f"{base}_{number}"
+        number += 1
+    return project_id
+
+
 def list_projects() -> list[dict]:
     out = []
     root = paths.projects

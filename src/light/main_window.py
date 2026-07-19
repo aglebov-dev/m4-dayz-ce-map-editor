@@ -208,10 +208,14 @@ class LightMainWindow(MainWindow):
                 f"из источника и потерять их?")
             if ok != QMessageBox.StandardButton.Yes:
                 return
-        from light.providers import make_provider
         try:
-            prov = make_provider(self.project.provider_cfg)
-            P.materialize(self.project, prov)
+            if self.project.provider_cfg.get("kind") == "bi":
+                from light import bi_import          # BI: переимпорт из папки CE Tool
+                bi_import.rematerialize(self.project)
+            else:
+                from light.providers import make_provider
+                provider = make_provider(self.project.provider_cfg)
+                P.materialize(self.project, provider)
         except Exception as e:
             QMessageBox.warning(self, "Перезагрузка", f"Не удалось: {e}")
             return

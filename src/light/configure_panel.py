@@ -237,7 +237,7 @@ class ConfigurePanel(QWidget):
                 or self.project_name_edit.placeholderText().strip()
                 or "map_project")
         project = P.Project(
-            id=_new_id(name),
+            id=P.new_id(name),
             name=name,
             provider_cfg=dict(self._provider_cfg),
             mission_name=mission_name,
@@ -251,13 +251,3 @@ class ConfigurePanel(QWidget):
             QMessageBox.critical(self, "Проект", f"Не удалось подготовить проект: {error}")
             return None
         return project
-
-
-def _new_id(name: str) -> str:
-    from core.paths import paths
-    base = "".join(c if c.isalnum() else "_" for c in name)[:32] or "proj"
-    project_id, number = base, 2
-    while paths.project(project_id).is_dir():
-        project_id = f"{base}_{number}"
-        number += 1
-    return project_id
