@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from light import bi_import
+from light.background_panel import BackgroundPanel
 from light.sources.base import ProjectSource
 
 
@@ -53,6 +54,9 @@ class BiProjectSource(ProjectSource):
         name_row.addWidget(self.name_edit, 1)
         layout.addLayout(name_row)
 
+        self.background_panel = BackgroundPanel()
+        layout.addWidget(self.background_panel)
+
         layout.addStretch(1)
 
         self.import_button = QPushButton("Импортировать проект")
@@ -86,13 +90,17 @@ class BiProjectSource(ProjectSource):
             f"слоёв: {len(summary.layers)}")
         if not self.name_edit.text().strip():
             self.name_edit.setText(os.path.basename(os.path.normpath(folder)) or "BI_project")
+        # мир для распаковки тайлов подложки (имя — из папки, размер — из проекта)
+        world = os.path.basename(os.path.normpath(folder)).lower()
+        self.background_panel.set_world(world, summary.world_size)
         self.import_button.setEnabled(True)
 
     def _import(self) -> None:
         folder = self.folder_edit.text().strip()
         name = self.name_edit.text().strip() or "BI_project"
         try:
-            project = bi_import.create_project(folder, name)
+            project = bi_import.create_project(
+                folder, name, background=self.background_panel.value())
         except Exception as error:
             QMessageBox.critical(self.widget, "Импорт BI",
                                  f"Не удалось импортировать: {error}")

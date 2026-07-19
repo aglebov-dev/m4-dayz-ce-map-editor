@@ -24,8 +24,9 @@ def read_summary(folder: str):
     return read_project(folder)
 
 
-def create_project(folder: str, name: str) -> P.Project:
-    """Импортировать проект CE Tool из папки в новый проект приложения."""
+def create_project(folder: str, name: str, background: str = "") -> P.Project:
+    """Импортировать проект CE Tool из папки в новый проект приложения.
+    `background` — как у обычного проекта: "" | "tiles:<world>" | "image:<path>"."""
     areaflags, cfglimits = import_ce_project(folder)
     project = P.Project(
         id=P.new_id(name),
@@ -33,7 +34,7 @@ def create_project(folder: str, name: str) -> P.Project:
         provider_cfg={"kind": "bi", "root": os.path.abspath(folder)},
         mission_name=_MISSION,
         files=dict(_FILES),
-        background="")
+        background=background)
     project.save()
     write_mission(areaflags, cfglimits, str(project.mission_dir))
     P.make_snapshot(project)

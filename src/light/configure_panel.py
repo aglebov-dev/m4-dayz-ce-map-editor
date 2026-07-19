@@ -3,18 +3,20 @@
 Провайдер-агностична: получает уже ПОДКЛЮЧЁННЫЙ `DataProvider` (ФС или SFTP) через
 `set_provider` и дальше сама находит миссии, показывает наличие файлов по ролям, собирает
 `Project` (материализация + снапшот). Переиспользуется источниками Folder/SFTP приветственного
-окна — вся детальная настройка живёт здесь, а источник отвечает только за ПОДКЛЮЧЕНИЕ."""
+окна — вся детальная настройка живёт здесь, а источник отвечает только за ПОДКЛЮЧЕНИЕ.
+Подложку выбирает общий `BackgroundPanel`."""
 from __future__ import annotations
 
 import os
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel, QLineEdit, QListWidget,
-    QListWidgetItem, QMessageBox, QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QGroupBox, QLabel, QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
+    QVBoxLayout, QWidget,
 )
 
 from light import project as P
+from light.background_panel import BackgroundPanel
 from light.gating import tool_status
 from light.providers import DataProvider
 
@@ -30,7 +32,6 @@ class ConfigurePanel(QWidget):
         self._provider_cfg: dict = {}
         self._missions: list[str] = []
         self._files: dict = {}
-        self._background_image_path = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -64,39 +65,9 @@ class ConfigurePanel(QWidget):
         files_layout.addWidget(self.tools_label)
         layout.addWidget(files_group, 1)
 
-        # --- подложка (спутник) ---
-        layout.addWidget(self._build_background_group())
-
-    def _build_background_group(self) -> QWidget:
-        self.background_combo = QComboBox()
-        self.background_image_button = QPushButton("Выбрать изображение…")
-        self.background_image_button.clicked.connect(self._pick_background_image)
-        self.game_edit = QLineEdit()
-        self.game_edit.setPlaceholderText("Папка клиента DayZ")
-        self.game_button = QPushButton("Открыть папку")
-        self.game_button.clicked.connect(self._pick_game)
-        self.unpack_button = QPushButton("Распаковать")
-        self.unpack_button.clicked.connect(self._unpack_background)
-
-        group = QGroupBox("Подложка (спутник)")
-        group_layout = QVBoxLayout(group)
-        group_layout.addWidget(QLabel(
-            "Масштабируется под размер мира из areaflags (км берутся из карты)."))
-        source_row = QHBoxLayout()
-        source_row.addWidget(QLabel("Источник:"))
-        source_row.addWidget(self.background_combo, 1)
-        source_row.addWidget(self.background_image_button)
-        group_layout.addLayout(source_row)
-        unpack_row = QHBoxLayout()
-        unpack_row.addWidget(self.game_edit, 1)
-        unpack_row.addWidget(self.game_button)
-        unpack_row.addWidget(self.unpack_button)
-        group_layout.addWidget(QLabel(
-            "Распаковать пирамиду тайлов (спутник) из файлов игры "
-            "(в служебную папку приложения):"))
-        group_layout.addLayout(unpack_row)
-        self._refresh_backgrounds()
-        return group
+        # --- подложка (общий виджет) ---
+        self.background_panel = BackgroundPanel()
+        layout.addWidget(self.background_panel)
 
     # ---------- провайдер ----------
 
@@ -143,6 +114,10 @@ class ConfigurePanel(QWidget):
         if not self.project_name_edit.text().strip():
             default = os.path.basename(mission_rel.rstrip("/")) or "map_project"
             self.project_name_edit.setPlaceholderText(default)
+        # мир для распаковки тайлов подложки
+        self.background_panel.set_world(
+            P.world_name(mission_rel),
+            P.read_world_size(self._provider, mission_rel) or 15360)
         self._update_tools()
         self._refresh_ready()
 
@@ -158,66 +133,6 @@ class ConfigurePanel(QWidget):
                 parts.append(f"<span style='color:#b26a00'>✖ {names[tool]} "
                              f"(нет: {', '.join(state['missing'])})</span>")
         self.tools_label.setText("Инструменты: " + " · ".join(parts))
-
-    # ---------- подложка ----------
-
-    def _refresh_backgrounds(self, keep: str = "") -> None:
-        from light import tiles_store
-        self.background_combo.blockSignals(True)
-        self.background_combo.clear()
-        self.background_combo.addItem("Нет", "")
-        for world in tiles_store.available_worlds():
-            self.background_combo.addItem(f"{world} (спутник)", f"tiles:{world}")
-        if self._background_image_path:
-            self.background_combo.addItem(
-                f"изображение: {os.path.basename(self._background_image_path)}",
-                f"image:{self._background_image_path}")
-        index = self.background_combo.findData(keep or "")
-        self.background_combo.setCurrentIndex(max(0, index))
-        self.background_combo.blockSignals(False)
-
-    def _pick_background_image(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(
-            self, "Изображение подложки", "", "Изображения (*.png *.jpg *.jpeg *.bmp)")
-        if path:
-            self._background_image_path = path
-            self._refresh_backgrounds(keep=f"image:{path}")
-
-    def _pick_game(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Папка DayZ")
-        if folder:
-            self.game_edit.setText(folder)
-
-    def _unpack_background(self) -> None:
-        from PySide6.QtGui import QCursor
-        from PySide6.QtWidgets import QApplication
-
-        from light import tiles_unpack
-        game = self.game_edit.text().strip()
-        mission_rel = self.mission_combo.currentData()
-        if not self._provider or mission_rel is None:
-            QMessageBox.information(self, "Распаковка",
-                                    "Сначала подключите источник и выберите миссию.")
-            return
-        world = P.world_name(mission_rel)
-        size = P.read_world_size(self._provider, mission_rel) or 15360
-        if not tiles_unpack.available():
-            QMessageBox.warning(
-                self, "Распаковка",
-                "Нужен .NET SDK 10+ (dotnet) и скрипт ExtractSatMap.cs.\n"
-                f"Скрипт: {tiles_unpack.script_path()}")
-            return
-        QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
-        try:
-            tiles_unpack.unpack(game, world, size)
-        except tiles_unpack.UnpackError as error:
-            QApplication.restoreOverrideCursor()
-            QMessageBox.warning(self, "Распаковка подложки", str(error))
-            return
-        QApplication.restoreOverrideCursor()
-        self._refresh_backgrounds(keep=f"tiles:{world}")
-        QMessageBox.information(self, "Распаковка",
-                                f"Подложка мира «{world}» ({size} м) распакована.")
 
     # ---------- готовность и сборка ----------
 
@@ -242,7 +157,7 @@ class ConfigurePanel(QWidget):
             provider_cfg=dict(self._provider_cfg),
             mission_name=mission_name,
             files=dict(self._files),
-            background=self.background_combo.currentData() or "")
+            background=self.background_panel.value())
         try:
             project.save()
             P.materialize(project, self._provider)
