@@ -34,16 +34,24 @@ class DiffPanel(QWidget):
         self.btn_clear = QPushButton(tr("diff.clear"))
         self.btn_clear.clicked.connect(self.clear_requested)
         self.btn_clear.setEnabled(False)
+        # Две строки: три кнопки в ряд требовали очень широкого дока (ширину диктовала
+        # самая длинная подпись). «Загрузить другой map…» уезжает во вторую строку.
         top = QHBoxLayout()
-        top.addWidget(self.btn_snapshot)
-        top.addWidget(self.btn_load, 1)
-        top.addWidget(self.btn_clear)
+        top.addWidget(self.btn_snapshot, 1)
+        top.addWidget(self.btn_clear, 1)
+        second = QHBoxLayout()
+        second.addWidget(self.btn_load, 1)
+        buttons = QVBoxLayout()
+        buttons.setSpacing(4)
+        buttons.addLayout(top)
+        buttons.addLayout(second)
 
         self.lbl = QLabel(tr("diff.hint"))
         self.lbl.setWordWrap(True)
         self.lbl.setTextFormat(Qt.TextFormat.RichText)
 
         self.legend = QLabel()
+        self.legend.setWordWrap(True)            # иначе одна длинная строка распирала док
         self.legend.setTextFormat(Qt.TextFormat.RichText)
         self.legend.setText(tr(
             "diff.legend",
@@ -70,7 +78,7 @@ class DiffPanel(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
-        lay.addLayout(top)
+        lay.addLayout(buttons)
         lay.addWidget(self.lbl)
         lay.addWidget(self.legend)
         lay.addWidget(self.tbl, 1)
