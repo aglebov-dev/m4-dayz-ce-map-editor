@@ -7,11 +7,18 @@
 from __future__ import annotations
 
 from light.sources.base import Availability, ProjectSource
+from light.sources.folder import FolderProjectSource
 from light.sources.recent import RecentProjectSource
+from light.sources.sftp import SftpProjectSource
 
 # Порядок вкладок слева направо. Первый доступный становится активным.
 SOURCES: list[type[ProjectSource]] = [
     RecentProjectSource,
+    FolderProjectSource,
+    SftpProjectSource,
 ]
 
-__all__ = ["SOURCES", "ProjectSource", "Availability", "RecentProjectSource"]
+__all__ = [
+    "SOURCES", "ProjectSource", "Availability",
+    "RecentProjectSource", "FolderProjectSource", "SftpProjectSource",
+]
