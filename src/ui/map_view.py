@@ -709,10 +709,23 @@ class MapView(QGraphicsView):
     def wheelEvent(self, ev):
         factor = 1.25 if ev.angleDelta().y() > 0 else 0.8
         cur = self.transform().m11()
-        if MIN_SCALE <= cur * factor <= MAX_SCALE:
-            self.scale(factor, factor)
-            self._auto_fit = False               # пользователь зумит — окно больше не вписывает
-            self._schedule_tiles_update()
+        if not (MIN_SCALE <= cur * factor <= MAX_SCALE):
+            return
+        # Якорь зума — точка под курсором, вычисляем ВРУЧНУЮ по свежей позиции из события,
+        # а не через AnchorUnderMouse: тот сразу после открытия (вьюпорт ещё не устоялся)
+        # брал неверную позицию и карта «прыгала». Масштабируем вокруг origin (NoAnchor) и
+        # возвращаем точку под курсор тем же скроллом, что и пан.
+        cursor = ev.position().toPoint()
+        anchor_scene = self.mapToScene(cursor)   # точка карты под курсором ДО зума
+        previous_anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.scale(factor, factor)
+        self.setTransformationAnchor(previous_anchor)
+        shift = self.mapFromScene(anchor_scene) - cursor   # куда уехала точка
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + shift.x())
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + shift.y())
+        self._auto_fit = False                   # пользователь зумит — окно больше не вписывает
+        self._schedule_tiles_update()
 
     def scrollContentsBy(self, dx, dy):
         super().scrollContentsBy(dx, dy)
