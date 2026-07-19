@@ -76,10 +76,10 @@ class LightMainWindow(MainWindow):
         # 4) убрать лишние элементы тулбара: миссия задаётся проектом, подложка —
         #    при загрузке проекта. Прячем «Каталог», «Карта:»+комбобокс, «Background…».
         from PySide6.QtWidgets import QLabel, QWidgetAction
-        main_tb = [t for t in self.findChildren(type(self.tb_tools))
+        main_toolbar = [t for t in self.findChildren(type(self.tb_tools))
                    if t.windowTitle() != "tools"][0]
         drop = {self.btn_workdir, self.cmb_mission, self.btn_background}
-        for act in main_tb.actions():
+        for act in main_toolbar.actions():
             if isinstance(act, QWidgetAction):
                 wdt = act.defaultWidget()
                 if wdt in drop or isinstance(wdt, QLabel):   # QLabel тут только «Карта:»
@@ -124,43 +124,43 @@ class LightMainWindow(MainWindow):
         # первый тулбар (не «tools», где кнопки панелей)
         toolbars = [t for t in self.findChildren(type(self.tb_tools))
                     if t.windowTitle() != "tools"]
-        main_tb = toolbars[0]
-        first = main_tb.actions()[0]
+        main_toolbar = toolbars[0]
+        first = main_toolbar.actions()[0]
 
         # СОХРАНИТЬ — яркая заметная кнопка слева
-        self.btn_save = QToolButton()
-        self.btn_save.setText("save")
-        self.btn_save.setToolTip("write areaflags.map")
-        self.btn_save.clicked.connect(self.on_save)
-        self.btn_save.setStyleSheet(
+        self.button_save = QToolButton()
+        self.button_save.setText("save")
+        self.button_save.setToolTip("write areaflags.map")
+        self.button_save.clicked.connect(self.on_save)
+        self.button_save.setStyleSheet(
             "QToolButton { background:#2e7d32; color:white; font-weight:bold;"
             " padding:3px 10px; border-radius:3px; }"
             "QToolButton:disabled { background:#c8c8c8; color:#888; }")
-        self.btn_save.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_save)
+        self.button_save.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_save)
 
-        self.btn_open = QToolButton()
-        self.btn_open.setText("Открыть проект…")
-        self.btn_open.setToolTip("Открыть/настроить проект (источник, файлы, снапшот)")
-        self.btn_open.clicked.connect(self.open_project_dialog)
-        main_tb.insertWidget(first, self.btn_open)
+        self.button_open = QToolButton()
+        self.button_open.setText("Открыть проект…")
+        self.button_open.setToolTip("Открыть/настроить проект (источник, файлы, снапшот)")
+        self.button_open.clicked.connect(self.open_project_dialog)
+        main_toolbar.insertWidget(first, self.button_open)
 
-        self.btn_reload = QToolButton()
-        self.btn_reload.setText("Перезагрузить проект")
-        self.btn_reload.setToolTip("Перечитать файлы проекта из источника (сбросит "
+        self.button_reload = QToolButton()
+        self.button_reload.setText("Перезагрузить проект")
+        self.button_reload.setToolTip("Перечитать файлы проекта из источника (сбросит "
                                    "несохранённые правки)")
-        self.btn_reload.clicked.connect(self.reload_project)
-        self.btn_reload.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_reload)
-        main_tb.insertSeparator(first)
+        self.button_reload.clicked.connect(self.reload_project)
+        self.button_reload.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_reload)
+        main_toolbar.insertSeparator(first)
 
-        self.btn_bi_export = QToolButton()
-        self.btn_bi_export.setText("Экспорт в BI…")
-        self.btn_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
+        self.button_bi_export = QToolButton()
+        self.button_bi_export.setText("Экспорт в BI…")
+        self.button_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
                                       "cfglimits + TGA-слои по флагам + проект XML")
-        self.btn_bi_export.clicked.connect(self.export_to_bi)
-        self.btn_bi_export.setEnabled(False)
-        main_tb.addWidget(self.btn_bi_export)
+        self.button_bi_export.clicked.connect(self.export_to_bi)
+        self.button_bi_export.setEnabled(False)
+        main_toolbar.addWidget(self.button_bi_export)
 
         # добавление/удаление флагов — в панели «Слои» (заголовки секций и строки)
         self.layers_panel.allow_add_flag = True
@@ -190,10 +190,10 @@ class LightMainWindow(MainWindow):
         self.project = proj
         self.load_workdir(proj.workdir)          # ядро читает материализованную миссию
         self.apply_gating()
-        self.btn_bi_export.setEnabled(True)
-        self.btn_reload.setEnabled(True)
+        self.button_bi_export.setEnabled(True)
+        self.button_reload.setEnabled(True)
         has_map = self.areaflags is not None
-        self.btn_save.setEnabled(has_map)
+        self.button_save.setEnabled(has_map)
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
 
     def reload_project(self):
@@ -300,13 +300,7 @@ class LightMainWindow(MainWindow):
         """Перестроить панель слоёв и список кисти под текущие usage/value (после
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
-        counts_tier = [int(np.count_nonzero(af.tier & (1 << b)))
-                       for b in range(len(af.values))]
-        counts_usage = [int(np.count_nonzero(af.usage & np.uint32(1 << b)))
-                        for b in range(len(af.usages))]
-        colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
-        colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
-        self.layers_panel.populate(af, counts_tier, counts_usage, colors, tiers_on=False)
+        self.layers.populate(af, tiers_on=False)     # презентер сам считает counts и цвета
         self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
                                   + [(f"usage:{n}", n) for n in af.usages])
 
