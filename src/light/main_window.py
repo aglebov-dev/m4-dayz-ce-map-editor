@@ -18,6 +18,7 @@ from core.flags import (
 from core.paths import paths
 from light import project as P
 from light.gating import missing_for, tool_ok
+from ui.diag import trace, log as _diag
 from ui.main_window import MainWindow
 
 # какие доки принадлежат какому инструменту (objectName -> tool).
@@ -89,6 +90,7 @@ class LightMainWindow(MainWindow):
                 if wdt in drop or isinstance(wdt, QLabel):   # QLabel тут только «Карта:»
                     act.setVisible(False)
 
+    @trace
     def _cap_floating(self, dock):
         """Отцепили панель — высота не больше половины экрана. resize ОТКЛАДЫВАЕМ на
         следующий тик: менять геометрию дока прямо внутри topLevelChanged (Qt ещё
@@ -97,7 +99,14 @@ class LightMainWindow(MainWindow):
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, lambda d=dock: self._cap_floating_now(d))
 
+    @trace
     def _cap_floating_now(self, dock):
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt as _Qt, QTimer
+        if QApplication.mouseButtons() != _Qt.MouseButton.NoButton:
+            _diag("defer _cap_floating_now (drag in progress)")
+            QTimer.singleShot(60, lambda d=dock: self._cap_floating_now(d))
+            return                                # пока драг — не трогаем геометрию
         try:
             if not dock.isFloating():             # успели вернуть в док — ничего не делаем
                 return

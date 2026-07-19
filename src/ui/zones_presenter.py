@@ -18,6 +18,7 @@ from PySide6.QtWidgets import QDockWidget
 from common.layer_colors import LayerColors
 from core.i18n import tr
 from core.zones import find_zones
+from ui.diag import trace
 from ui.app_bus import AppBus
 from ui.zones_panel import ZonesPanel
 
@@ -81,6 +82,7 @@ class ZonesPresenter(QObject):
         if self.dock.isVisible():
             self._show(key)
 
+    @trace
     def _on_visible(self, visible: bool) -> None:
         if visible and self._key:
             self._show(self._key)

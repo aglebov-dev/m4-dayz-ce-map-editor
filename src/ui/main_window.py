@@ -36,6 +36,7 @@ from core.territories import read_territories
 from core.workspace import Mission, Settings, scan_workdir
 from core.writer import FileChangedError, WriteError, save_areaflags
 from core.zones import find_zones
+from ui.diag import trace, log as _diag
 from ui.brush_panel import BrushPanel
 from ui.ce_project_panel import CeProjectPanel
 from ui.flow_layout import FlowLayout
@@ -396,7 +397,16 @@ class MainWindow(QMainWindow):
             lambda on, d=dock: self._ensure_dock_visible(d) if on else None)
         self.tb_tools.addWidget(btn)
 
+    @trace
     def _remember_dock_state(self, dock: QDockWidget):
+        # Во время перетаскивания дока (зажата кнопка мыши) Qt держит в layout временные
+        # drag-виджеты (gap/QDockWidgetGroupWindow). Наши запросы tabifiedDockWidgets/
+        # dockWidgetArea в этот момент могут обратиться к полуживому C++ объекту → нативный
+        # abort. Мид-драг состояние всё равно мусорное — пропускаем, старое остаётся.
+        from PySide6.QtWidgets import QApplication
+        if QApplication.mouseButtons() != Qt.MouseButton.NoButton:
+            _diag("skip _remember_dock_state (drag in progress)")
+            return
         from PySide6.QtCore import QRect
         try:
             self._dock_state[dock.objectName()] = {
@@ -414,6 +424,7 @@ class MainWindow(QMainWindow):
         return any(rect.intersects(s.availableGeometry())
                    for s in QGuiApplication.screens())
 
+    @trace
     def _ensure_dock_visible(self, dock: QDockWidget):
         """Открытый тоглом док возвращается в свою группу вкладок; ПЛАВАЮЩИЙ без валидного
         сохранённого положения — по центру окна (общее правило `_float_centered`)."""
@@ -661,6 +672,7 @@ class MainWindow(QMainWindow):
             self.dock_brush.show()
             self.dock_brush.raise_()
 
+    @trace
     def _on_brush_visibility(self, visible: bool):
         """Док кисти скрыли (закрыли/ушли на другую вкладку) — выключаем режим рисования."""
         if not visible and self.brush_panel.sw_mode.isChecked():
@@ -1008,6 +1020,7 @@ class MainWindow(QMainWindow):
         else:
             self._stats_timer.start()            # рестарт: серия мазков = один пересчёт
 
+    @trace
     def _on_stats_visible(self, visible: bool):
         if visible and self._stats_dirty:
             self.refresh_stats(now=True)
