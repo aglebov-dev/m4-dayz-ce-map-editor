@@ -47,6 +47,7 @@ from ui.layers_panel import LayersPanel, ObjectsLayersPanel, TerritoriesPanel
 from ui.app_bus import AppBus
 from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
+from ui.inspector_presenter import InspectorPresenter
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
 from ui.map_view import MapView
@@ -194,17 +195,13 @@ class MainWindow(QMainWindow):
         self.zones_panel = self.zones.panel          # алиас (export_csv, apply_layer_color)
         self.dock_zones = self.zones.dock
 
-        self.inspector = InspectorPanel(self)
+        # === фича «Инспектор слоёв»: вся логика в ui/inspector_presenter.py ===
+        self.inspector = InspectorPresenter(
+            self, view=self.view, bus=self.bus, wrap=self._dock_widget)
+        self.inspector_panel = self.inspector.panel   # алиас на сам виджет
+        self.dock_inspector = self.inspector.dock
+        # клик по карте обслуживает и инспектор слоёв, и объектов — общий диспетчер
         self.view.clicked_world.connect(self.on_map_clicked)
-        self.inspector.sw_active.toggled.connect(self.on_inspector_toggled)
-        # тогл слоя из инспектора -> панель слоёв (единый источник истины) -> эхо обратно
-        self.inspector.layer_toggle_requested.connect(
-            lambda key, v: self.layers_panel.row(key).btn.setChecked(v))
-        # фича «Инспектор слоёв» слушает шину слоёв (источник: ui/layers_presenter.py)
-        self.bus.layer_toggled.connect(self.inspector.update_layer_state)
-        self.dock_inspector = QDockWidget(tr("dock.inspector_layers"), self)
-        self.dock_inspector.setObjectName("dock_inspector")
-        self.dock_inspector.setWidget(self._dock_widget(self.inspector))
 
         # инспектор объектов — вкладкой в одном пространстве с инспектором слоёв
         self.objects_panel = ObjectsInspectorPanel(self)
@@ -740,8 +737,7 @@ class MainWindow(QMainWindow):
             colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
             colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
         if want_layers:
-            self.inspector.show_point(x, z, af, colors, visible, water=self._water_at(x, z))
-            self.view.set_marker(x, z)           # точка — только для инспектора слоёв
+            self.inspector.show_at(x, z, af, colors, visible, water=self._water_at(x, z))
         if want_objects and af is not None and self.buildings is not None:
             info = self._building_nearest(x, z)
             self.objects_panel.show_building(info, af, colors, visible)
@@ -1295,10 +1291,6 @@ class MainWindow(QMainWindow):
         self.settings.lang = lang
         self.settings.save()
         self.language_changed.emit(lang)         # app.py пересоздаст окно
-
-    def on_inspector_toggled(self, active: bool):
-        if not active:
-            self.view.clear_marker()             # точка принадлежит инспектору слоёв
 
     def on_objects_toggled(self, active: bool):
         if not active:
