@@ -5,10 +5,13 @@
 как обычную карту. Плюс генерируется `cfglimitsdefinition.xml` (списки флагов) — его
 `core.areaflags.read_limits` требует рядом с картой.
 
-Round-trip с `bi_export` точный для НАШИХ экспортов (слой-на-флаг, без сдвига). У проектов,
-скомпилированных настоящим BI CE Tool, usage-битплан лежит на 1 колонку западнее
-нарисованного слоя (см. docs/knowledge.md и `core.ce_project`) — здесь НЕ сдвигаем: берём
-слои как есть (что художник нарисовал), сдвиг компилятора не воспроизводим."""
+Сдвиг usage (важно!): компилятор BI кладёт usage-битплан на 1 колонку ЗАПАДНЕЕ
+нарисованного слоя (тиры — без сдвига). Это НЕ приблизительно: сверено с офиц. проектами
+DayZ-Central-Economy (CETool/* → dayzOffline.*) — usage со сдвигом на запад совпадает с
+боевым areaflags.map на 100% (chernarus/enoch/sakhal). Поэтому импорт воспроизводит сдвиг,
+а `bi_export` — обратный (на восток), чтобы round-trip и экспорт были верны реальному BI.
+Флаг слоя берётся из АТРИБУТА usage_flags/value_flags XML, не из имени: у Def-слоёв в
+реальных проектах атрибут часто 0 (пустой вклад) — по имени вышло бы переокрашивание."""
 from __future__ import annotations
 
 import os
@@ -27,6 +30,24 @@ class CeImportError(Exception):
 # Формат ограничен разрядностью битпланов areaflags.map:
 MAX_USAGES = 32          # usage — uint32/ячейку
 MAX_VALUES = 8           # value(tier) — uint8/ячейку (при ≤4 — ниббл)
+
+
+def shift_usage_west(plane: np.ndarray) -> np.ndarray:
+    """Сдвиг usage на 1 колонку западнее (out[:, x] = in[:, x+1]), крайняя восточная
+    колонка обнуляется (без wrap). Соответствие боевому areaflags при импорте BI: сверено —
+    100% совпадение по usage (расхождения только в самой восточной колонке-кромке карты:
+    у enoch там 385 ячеек, у chernarus/sakhal — 1; это предел, колонки x+1 за краем нет)."""
+    out = np.zeros_like(plane)
+    out[:, :-1] = plane[:, 1:]
+    return out
+
+
+def shift_usage_east(plane: np.ndarray) -> np.ndarray:
+    """Обратный сдвиг (out[:, x] = in[:, x-1]) — для экспорта в BI, чтобы компилятор BI
+    (сдвигающий на запад) вернул исходный usage."""
+    out = np.zeros_like(plane)
+    out[:, 1:] = plane[:, :-1]
+    return out
 
 
 def _make_header(grid_x: int, grid_y: int, size_x: int, size_y: int) -> np.ndarray:
@@ -72,6 +93,9 @@ def build_areaflags(project: CeProject) -> AreaFlags:
                 raise CeImportError(
                     f"слой «{layer.name}»: value-маска {layer.value_mask} шире 8 бит")
             tier[mask] |= np.uint8(layer.value_mask)
+
+    # usage сдвигается на колонку западнее (соответствие боевому areaflags); тир — как есть
+    usage = shift_usage_west(usage.reshape(grid, grid)).reshape(-1)
 
     return AreaFlags(
         grid_x=grid, grid_y=grid, size_x=world, size_y=world,
