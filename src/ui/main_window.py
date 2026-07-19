@@ -28,7 +28,6 @@ from core.i18n import tr
 from core.tiles import find_tiles
 from core.types import instances_for_item, items_for_building, read_types
 
-ITEM_LAYER_COLOR = (255, 64, 200)    # слой «где может лежать предмет» (обратный матчинг)
 from core.stats import (
     buildings_in_region, items_for_region, map_stats, region_from_world,
 )
@@ -44,6 +43,15 @@ from ui.diff_panel import DiffPanel
 from ui.inspector_panel import InspectorPanel
 from ui.items_panel import ItemsPanel
 from ui.layers_panel import LayersPanel, ObjectsLayersPanel, TerritoriesPanel
+from ui.app_bus import AppBus
+from ui.layers_presenter import LayersPresenter
+from ui.zones_presenter import ZonesPresenter
+from ui.inspector_presenter import InspectorPresenter
+from ui.objects_presenter import ObjectsPresenter
+from ui.items_presenter import ItemsPresenter
+from ui.territories_presenter import TerritoriesPresenter
+from common.buildings import BuildingsModel
+from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
 from ui.map_view import MapView
 from ui.objects_panel import ObjectsInspectorPanel
@@ -147,91 +155,69 @@ class MainWindow(QMainWindow):
         self.status_coords = QLabel("—")
         self.statusBar().addPermanentWidget(self.status_coords)
 
-        # панель слоёв (тиры + usage) — ИНСТРУМЕНТАРИЙ СЛЕВА
-        self.layers_panel = LayersPanel(self)
-        self.layers_panel.layer_toggled.connect(self.on_layer_toggled)
-        self.layers_panel.color_clicked.connect(self.on_layer_color_clicked)
-        self.layers_panel.opacity_changed.connect(self.on_opacity_changed)
-        self.dock_layers = QDockWidget(tr("dock.layers"), self)
-        self.dock_layers.setObjectName("dock_layers")
-        self.dock_layers.setWidget(self._dock_widget(self.layers_panel))
-        self._layers_built: set[str] = set()     # какие пиксмапы уже построены
-
-        # панель объектов — отдельным доком под слоями (по умолчанию пополам)
-        self.objects_layers = ObjectsLayersPanel(self)
-        self.objects_layers.layer_toggled.connect(self.on_layer_toggled)
-        self.objects_layers.color_clicked.connect(self.on_layer_color_clicked)
-        self.objects_layers.opacity_changed.connect(self.on_opacity_changed)
-        self.dock_obj_layers = QDockWidget(tr("layers.objects"), self)
-        self.dock_obj_layers.setObjectName("dock_obj_layers")
-        self.dock_obj_layers.setWidget(self._dock_widget(self.objects_layers))
-
-        # территории животных (круги из env/*_territories.xml)
-        self.territories_panel = TerritoriesPanel(self)
-        self.territories_panel.layer_toggled.connect(self.on_layer_toggled)
-        self.territories_panel.color_clicked.connect(self.on_layer_color_clicked)
-        self.territories_panel.opacity_changed.connect(self.on_opacity_changed)
-        self.dock_territories = QDockWidget(tr("dock.territories"), self)
-        self.dock_territories.setObjectName("dock_territories")
-        self.dock_territories.setWidget(self._dock_widget(self.territories_panel))
+        # общий подбор цвета слоёв (для всех фич) + шина кросс-фичевых событий
         self._terr_colors: dict[str, tuple[int, int, int]] = {}
+        self.bus = AppBus(self)
+        self.colors = LayerColors(
+            settings=self.settings, mission=self.current_mission,
+            areaflags=lambda: getattr(self, "areaflags", None),
+            territory_colors=self._terr_colors)
 
-        # панели информации — СПРАВА: зоны сверху, инспектор снизу
-        self.zones_panel = ZonesPanel(self)
-        self.zones_panel.zone_clicked.connect(self.view.zoom_to_world)
-        self.zones_panel.zone_selected.connect(self.view.set_selected_zone)
-        self.zones_panel.labels_toggled.connect(self.view.set_zone_labels_visible)
-        self.zones_panel.layer_toggle_requested.connect(
-            lambda key, v: self.layers_panel.row(key).btn.setChecked(v))
-        self.layers_panel.layer_toggled.connect(self.zones_panel.update_layer_state)
-        self.layers_panel.layer_selected.connect(self.on_layer_selected)
-        self.dock_zones = QDockWidget(tr("dock.zones"), self)
-        self.dock_zones.setObjectName("dock_zones")
-        self.dock_zones.setWidget(self._dock_widget(self.zones_panel))
-        self._zones_cache: dict[str, list] = {}
-        self._zones_key: str | None = None        # чьи зоны показать, когда панель откроют
-        self.dock_zones.visibilityChanged.connect(self._on_zones_visible)
-        # слой, включённый ВЫБОРОМ (а не тоглом): гасим его при смене выбора
-        self._auto_shown: str | None = None
-        self._suppress_auto = False               # идёт наше setChecked, не пользователь
+        # === фича «Слои» (tier/usage): вся логика в ui/layers_presenter.py ===
+        # Презентер владеет своей панелью и доком; MainWindow только расставляет доки.
+        self.layers = LayersPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
+        self.layers_panel = self.layers.panel        # алиас для смежного кода (кисть/инспектор)
+        self.dock_layers = self.layers.dock          # для реестра доков и расстановки
 
-        self.inspector = InspectorPanel(self)
+        # === фича «Объекты» (obj-слои + инспектор объектов + спавн): ui/objects_presenter.py ===
+        self.objects = ObjectsPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
+        self.loot_panel = self.objects.loot_panel        # алиас: нужен для лута по области
+        self.dock_obj_layers = self.objects.dock_layers
+        self.dock_objects = self.objects.dock_inspector
+        self.dock_loot = self.objects.dock_loot
+
+        # === фича «Территории» (круги животных): ui/territories_presenter.py ===
+        self.territories = TerritoriesPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, territory_colors=self._terr_colors,
+            wrap=self._dock_widget)
+        self.territories_panel = self.territories.panel   # алиас (light прячет этот док)
+        self.dock_territories = self.territories.dock
+
+        # панели информации — СПРАВА. === фича «Зоны»: вся логика в ui/zones_presenter.py ===
+        self.zones = ZonesPresenter(
+            self, view=self.view, colors=self.colors, bus=self.bus,
+            areaflags=lambda: getattr(self, "areaflags", None),
+            is_layer_visible=self.layers.is_visible, wrap=self._dock_widget)
+        self.zones_panel = self.zones.panel          # алиас (export_csv: layer_key)
+        self.dock_zones = self.zones.dock
+
+        # === фича «Инспектор слоёв»: вся логика в ui/inspector_presenter.py ===
+        self.inspector = InspectorPresenter(
+            self, view=self.view, bus=self.bus, wrap=self._dock_widget)
+        self.inspector_panel = self.inspector.panel   # алиас на сам виджет
+        self.dock_inspector = self.inspector.dock
+        # клик по карте обслуживает и инспектор слоёв, и объектов — общий диспетчер
         self.view.clicked_world.connect(self.on_map_clicked)
-        self.inspector.sw_active.toggled.connect(self.on_inspector_toggled)
-        # тогл слоя из инспектора -> панель слоёв (единый источник истины) -> эхо обратно
-        self.inspector.layer_toggle_requested.connect(
-            lambda key, v: self.layers_panel.row(key).btn.setChecked(v))
-        self.layers_panel.layer_toggled.connect(self.inspector.update_layer_state)
-        self.dock_inspector = QDockWidget(tr("dock.inspector_layers"), self)
-        self.dock_inspector.setObjectName("dock_inspector")
-        self.dock_inspector.setWidget(self._dock_widget(self.inspector))
-
-        # инспектор объектов — вкладкой в одном пространстве с инспектором слоёв
-        self.objects_panel = ObjectsInspectorPanel(self)
-        self.objects_panel.sw_active.toggled.connect(self.on_objects_toggled)
-        self.objects_panel.layer_toggle_requested.connect(
-            lambda key, v: self.layers_panel.row(key).btn.setChecked(v))
-        self.layers_panel.layer_toggled.connect(self.objects_panel.update_layer_state)
-        self.dock_objects = QDockWidget(tr("dock.inspector_objects"), self)
-        self.dock_objects.setObjectName("dock_objects")
-        self.dock_objects.setWidget(self._dock_widget(self.objects_panel))
-
-        # панель спавна: что может лежать в выбранном здании
-        self.loot_panel = LootPanel(self)
-        self.dock_loot = QDockWidget(tr("dock.loot"), self)
-        self.dock_loot.setObjectName("dock_loot")
-        self.dock_loot.setWidget(self._dock_widget(self.loot_panel))
 
         # панель статистики: площади флагов по карте / по выделенной области
         self.stats_panel = StatsPanel(self)
         self.stats_panel.scope_changed.connect(self.on_stats_scope)
-        self.stats_panel.flag_clicked.connect(self.on_layer_selected)
+        self.stats_panel.flag_clicked.connect(self.bus.layer_selected)  # клик по флагу = выбрать слой
         self.stats_panel.clear_region_requested.connect(self.on_clear_region)
         self.dock_stats = QDockWidget(tr("dock.stats"), self)
         self.dock_stats.setObjectName("dock_stats")
         self.dock_stats.setWidget(self._dock_widget(self.stats_panel))
         # сводка считается по всей карте (~100 мс) — во время рисования коалесцируем
         self._stats_dirty = False
+
+        # === Шина слоёв (AppBus): что осталось на MainWindow ===
+        # авто-показ -> layers_presenter; показ и цвет зон -> zones_presenter; тут — только кисть
+        self.bus.layer_selected.connect(self.on_layer_selected)   # выбор -> слой рисования кисти (ниже)
         self._stats_timer = QTimer(self)
         self._stats_timer.setSingleShot(True)
         self._stats_timer.setInterval(250)
@@ -291,11 +277,11 @@ class MainWindow(QMainWindow):
         self._diff_key = None                    # какой флаг сейчас на карте
 
         # панель Items: весь справочник типов, мультивыбор -> здания на карте
-        self.items_panel = ItemsPanel(self)
-        self.items_panel.selection_changed.connect(self.on_items_selection)
-        self.dock_items = QDockWidget(tr("dock.items"), self)
-        self.dock_items.setObjectName("dock_items")
-        self.dock_items.setWidget(self._dock_widget(self.items_panel))
+        # === фича «Предметы» (обратный матчинг): ui/items_presenter.py ===
+        self.items = ItemsPresenter(
+            self, view=self.view, buildings=lambda: self.buildings_model,
+            building_opacity=self.objects.opacity, wrap=self._dock_widget)
+        self.dock_items = self.items.dock
 
         self._default_dock_layout()
 
@@ -561,26 +547,19 @@ class MainWindow(QMainWindow):
 
     def load_areaflags(self, m: Mission):
         self.areaflags = None
-        self.buildings = None
+        self.buildings_model = None              # common.buildings.BuildingsModel | None
+        self.buildings = None                    # алиасы модели (пока читают статистика/light)
         self.types = None
-        self.bld_eff_u = None                    # эффективные маски инстансов (numpy)
+        self.bld_eff_u = None
         self.bld_eff_v = None
         self.view.clear_buildings()
         self.view.clear_territories()
-        self.territories_panel.clear()
-        self._terr_colors.clear()
-        self.objects_panel.clear()
-        self.loot_panel.clear()
-        self.items_panel.clear()
+        self.territories.clear()
+        self.items.clear()
         self.view.clear_overlays()
-        self._layers_built.clear()
-        self.layers_panel.clear()
-        self.objects_layers.clear()
-        self.zones_panel.clear()
-        self.view.set_zone_labels(None, 0.0, (0, 0, 0))
-        self._zones_cache.clear()
-        self._zones_key = None
-        self._auto_shown = None
+        self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
+        self.objects.clear()                     # obj-слои + инспектор объектов + спавн
+        self.zones.clear()
         self.view.clear_region()                 # выделение принадлежит прошлой карте
         self.stats_panel.clear()
         self.on_diff_clear()                     # дифф считался против прошлой карты
@@ -610,53 +589,17 @@ class MainWindow(QMainWindow):
         af = self.areaflags
         # снимок «как на диске»: по нему считается, сколько ячеек развела кисть
         self._af_orig = (af.usage.copy(), af.tier.copy())
-        counts_tier = [int(np.count_nonzero(af.tier & (1 << b)))
-                       for b in range(len(af.values))]
-        counts_usage = [int(np.count_nonzero(af.usage & np.uint32(1 << b)))
-                        for b in range(len(af.usages))]
-        colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
-        colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
-        objects = []
-        if os.path.isfile(os.path.join(m.path, "mapgroupproto.xml")) and \
-                os.path.isfile(os.path.join(m.path, "mapgrouppos.xml")):
-            try:
-                self.buildings = read_buildings(m.path, af.usages, af.values)
-                b = self.buildings
-                # эффективные маски всех инстансов разом (формула спавна)
-                ci = ((b.z / af.cell_size).astype(np.int64) * af.grid_x
-                      + (b.x / af.cell_size).astype(np.int64))
-                group_u = np.array([b.protos[n].usage_mask for n in b.names],
-                                   dtype=np.uint32)
-                group_v = np.array([b.protos[n].value_mask for n in b.names],
-                                   dtype=np.uint8)
-                self.bld_eff_u = group_u | af.usage[ci]
-                self.bld_eff_v = af.tier[ci] | group_v
-                # «без флагов»: пустые эффективные маски (не матчатся по usage/value)
-                n_noflags = int(np.count_nonzero((self.bld_eff_u == 0)
-                                                 & (self.bld_eff_v == 0)))
-                objects = [("obj:buildings", tr("layers.no_flags"),
-                            self.layer_color("obj:buildings"), n_noflags)]
-                # здания по эффективным флагам — отдельными тоглами в цвет флага
-                for bit, name in enumerate(af.values):
-                    cnt = int(np.count_nonzero(self.bld_eff_v >> np.uint8(bit) & 1))
-                    if cnt:
-                        key = f"obj:tier:{name}"
-                        objects.append((key, name, self.layer_color(key), cnt))
-                for bit, name in enumerate(af.usages):
-                    cnt = int(np.count_nonzero(self.bld_eff_u >> np.uint32(bit) & 1))
-                    if cnt:
-                        key = f"obj:usage:{name}"
-                        objects.append((key, name, self.layer_color(key), cnt))
-                try:
-                    self.types = read_types(m.path, af.usages, af.values)
-                    self.items_panel.populate(self.types)
-                except Exception:
-                    self.types = None
-            except Exception:
-                self.buildings = None
-                self.bld_eff_u = self.bld_eff_v = None
-        self.layers_panel.populate(af, counts_tier, counts_usage, colors, tiers_on=True)
-        self.objects_layers.populate(objects)
+        # модель зданий (Qt-free) — источник для инспектора объектов/спавна/предметов
+        self.buildings_model = BuildingsModel.build(m.path, af)
+        model = self.buildings_model
+        self.buildings = model.buildings if model else None       # алиасы (статистика/light)
+        self.bld_eff_u = model.eff_u if model else None
+        self.bld_eff_v = model.eff_v if model else None
+        self.types = model.types if model else None
+        if model and self.types is not None:
+            self.items.populate(self.types)
+        self.layers.populate(af)                 # презентер сам считает counts и цвета
+        self.objects.populate(af, model)         # obj-слои: счётчики из модели, цвета из common
         self._load_territories(m)
         self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
                                   + [(f"usage:{n}", n) for n in af.usages])
@@ -667,90 +610,17 @@ class MainWindow(QMainWindow):
         else:
             self.lbl_af.setText(tr("af.v1"))
 
-    def on_opacity_changed(self, prefix: str, v: int):
-        if prefix == "obj:":
-            self.view.set_buildings_opacity(v / 100.0)
-        elif prefix == "terr:":
-            self.view.set_territory_opacity(v / 100.0)
-        else:
-            self.view.set_overlay_opacity(v / 100.0, prefix=prefix)
-
     def layer_color(self, key: str) -> tuple[int, int, int]:
-        """Цвет слоя: пользовательское переопределение или цвет по умолчанию."""
-        m = self.current_mission()
-        if m:
-            saved = self.settings.layer_color(m.name, key)
-            if saved:
-                return saved
-        parts = key.split(":")
-        af = self.areaflags
-        if parts[0] == "terr":
-            return self._terr_colors.get(key, (255, 140, 0))   # цвет из файла территории
-        if parts[0] == "tier":
-            return tier_color(af.values, af.values.index(parts[1]))
-        if parts[0] == "usage":
-            return usage_color(parts[1], af.usages.index(parts[1]))
-        if parts[0] == "obj" and len(parts) == 3:    # здания по флагу — в цвет флага
-            if parts[1] == "tier":
-                return tier_color(af.values, af.values.index(parts[2]))
-            return usage_color(parts[2], af.usages.index(parts[2]))
-        return (0, 229, 255)                     # obj:buildings — циан по умолчанию
-
-    def on_layer_toggled(self, key: str, visible: bool):
-        """Тогл слоя из панели; пиксмап строится лениво при первом включении."""
-        af = self.areaflags
-        if not af:
-            return
-        if not self._suppress_auto and key == self._auto_shown:
-            self._auto_shown = None              # пользователь тронул тогл — слой его
-        if key.startswith("obj:"):
-            if visible and self.buildings is not None and key not in self._layers_built:
-                xs, zs, sel = self._buildings_subset(key)
-                self.view.set_buildings(key, xs, zs, self.layer_color(key), indices=sel)
-                self.view.set_buildings_opacity(self.objects_layers.opacity("obj:"))
-                self._layers_built.add(key)
-            self.view.set_buildings_visible(key, visible)
-            return
-        if key.startswith("terr:"):
-            self.view.set_territory_visible(key, visible)
-            return
-        if visible and key not in self._layers_built:
-            self._build_layer(key)
-        self.view.set_overlay_visible(key, visible)
-
-    def _build_layer(self, key: str):
-        af = self.areaflags
-        kind, name = key.split(":", 1)
-        color = self.layer_color(key)
-        if kind == "tier":
-            bit = af.values.index(name)          # z по биту: старший тир поверх
-            z = 10 + bit
-        else:
-            bit = af.usages.index(name)
-            z = 20 + bit
-        self.view.set_overlay(key, build_flag_pixmap(af, name, color), z=z,
-                              opacity=self.layers_panel.opacity(key))
-        self._layers_built.add(key)
+        """Совместимость: логика подбора вынесена в common.layer_colors.LayerColors."""
+        return self.colors.color(key)
 
     def _load_territories(self, m):
-        """Круги территорий животных: слой на файл env/*_territories.xml."""
-        try:
-            layers = read_territories(m.path)
-        except Exception:
-            layers = []
-        items = []
-        for tl in layers:
-            key = f"terr:{tl.name}"
-            color = self.settings.layer_color(m.name, key) or tl.color
-            self._terr_colors[key] = tl.color    # дефолт из файла (для сброса цвета)
-            self.view.set_territory(key, tl.x, tl.z, tl.r, color)
-            items.append((key, tl.name, color, tl.count))
-        self.territories_panel.populate(items)
-        self.view.set_territory_opacity(self.territories_panel.opacity("terr:"))
+        """Хук загрузки территорий (в лёгком редакторе переопределён в no-op)."""
+        self.territories.populate(m)
 
     def on_map_clicked(self, x: float, z: float):
         want_layers = self.inspector.is_active()
-        want_objects = self.objects_panel.is_active()
+        want_objects = self.objects.is_active()
         if not (want_layers or want_objects):
             return
         m = self.current_mission()
@@ -764,127 +634,18 @@ class MainWindow(QMainWindow):
             colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
             colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
         if want_layers:
-            self.inspector.show_point(x, z, af, colors, visible, water=self._water_at(x, z))
-            self.view.set_marker(x, z)           # точка — только для инспектора слоёв
-        if want_objects and af is not None and self.buildings is not None:
-            info = self._building_nearest(x, z)
-            self.objects_panel.show_building(info, af, colors, visible)
-            # объектам точку не ставим: подсвечиваем саму отметку здания/кластер
-            self.view.set_selected_building(info["index"] if info else None)
-            # калькулятор спавна: что может лежать в этом здании
-            if info and self.types:
-                proto = self.buildings.protos[info["name"]]
-                self.loot_panel.show_items(
-                    info["name"],
-                    items_for_building(self.types, proto, info["eff_u"], info["eff_v"]))
-            else:
-                self.loot_panel.clear()
+            self.inspector.show_at(x, z, af, colors, visible, water=self._water_at(x, z))
+        if want_objects:
+            self.objects.show_building_at(x, z, af, colors, visible)
 
-    def _buildings_subset(self, key: str) -> tuple:
-        """(x, z, глобальные индексы) инстансов слоя: без флагов или по биту маски."""
-        b = self.buildings
-        parts = key.split(":")
-        if len(parts) == 2:                      # obj:buildings — без флагов
-            sel = np.flatnonzero((self.bld_eff_u == 0) & (self.bld_eff_v == 0))
-        elif parts[1] == "tier":
-            bit = self.areaflags.values.index(parts[2])
-            sel = np.flatnonzero(self.bld_eff_v >> np.uint8(bit) & 1)
-        else:
-            bit = self.areaflags.usages.index(parts[2])
-            sel = np.flatnonzero(self.bld_eff_u >> np.uint32(bit) & 1)
-        return b.x[sel], b.z[sel], sel
-
-    BUILDING_PICK_M = 20.0                       # радиус выбора здания вокруг клика
-
-    def _building_nearest(self, x: float, z: float) -> dict | None:
-        """Ближайший лутабельный инстанс в радиусе + эффективные флаги по формуле."""
-        b, af = self.buildings, self.areaflags
-        if b is None or af is None or not len(b.x):
-            return None
-        d2 = (b.x - x) ** 2 + (b.z - z) ** 2
-        i = int(np.argmin(d2))
-        dist = float(d2[i]) ** 0.5
-        if dist > self.BUILDING_PICK_M:
-            return None
-        bx, bz = float(b.x[i]), float(b.z[i])
-        proto = b.protos[b.names[i]]
-        idx = int(bz / af.cell_size) * af.grid_x + int(bx / af.cell_size)
-        cell_u, cell_t = int(af.usage[idx]), int(af.tier[idx])
-        return {
-            "index": i, "name": proto.name, "dist": dist, "x": bx, "z": bz,
-            "lootmax": proto.lootmax, "points": proto.points,
-            "group_u": proto.usage_mask, "group_v": proto.value_mask,
-            "cell_u": cell_u, "cell_v": cell_t,
-            "eff_u": proto.usage_mask | cell_u,          # usage группы ∪ ячейки
-            "eff_v": cell_t | proto.value_mask,          # тир ячейки ∪ value группы
-        }
-
-    def on_items_selection(self, names: list[str]):
-        """Мультивыбор в Items: объединённый слой зданий отмеченных предметов."""
-        b = self.buildings
-        if not names or b is None or self.types is None or self.bld_eff_u is None:
-            self.view.set_buildings("items", None, None, (0, 0, 0))
-            self.items_panel.set_result(0)
-            return
-        parts = [instances_for_item(self.types[n], b, self.bld_eff_u, self.bld_eff_v)
-                 for n in names if n in self.types]
-        sel = (np.unique(np.concatenate(parts)) if parts
-               else np.empty(0, dtype=np.int64))
-        self.view.set_buildings("items", b.x[sel], b.z[sel], ITEM_LAYER_COLOR,
-                                indices=sel)
-        self.view.set_buildings_opacity(self.objects_layers.opacity("obj:"))
-        self.view.set_buildings_visible("items", True)
-        self.items_panel.set_result(len(sel))
 
     def on_layer_selected(self, key: str):
-        """Клик по строке слоя — выбор слоя (в режиме кисти — слой рисования) и его зоны.
-        Панель «Зоны» САМА НЕ ОТКРЫВАЕТСЯ: закрыл — значит не нужна; зоны посчитаются,
-        когда её откроют (заодно не платим за find_zones впустую)."""
-        af = self.areaflags
-        if not af or key.startswith("obj:"):     # у объектов зон нет
+        """Выбор слоя (клик по строке / флагу в статистике): в режиме кисти делаем слой
+        рисуемым. Авто-показ слоя — в layers_presenter, показ зон — в zones_presenter."""
+        if not self.areaflags or key.startswith("obj:"):
             return
         if self.view._brush_mode:
             self.brush_panel.select_layer(key)   # -> on_brush_layer -> подсветка
-        self._auto_show_layer(key)
-        self._zones_key = key
-        if self.dock_zones.isVisible():
-            self._show_zones(key)
-
-    def _auto_show_layer(self, key: str):
-        """Выбранный слой показываем сам, но такой показ ВРЕМЕННЫЙ: сменили выбор —
-        погасили. Слой, включённый пользователем через тогл, не трогаем: это его выбор."""
-        prev = self._auto_shown
-        if prev and prev != key:
-            row = self.layers_panel.row(prev)
-            if row and row.btn.isChecked():
-                self._suppress_auto = True       # это не пользователь — не сбрасываем метку
-                row.btn.setChecked(False)
-                self._suppress_auto = False
-            self._auto_shown = None
-        row = self.layers_panel.row(key)
-        if row and not row.btn.isChecked():
-            self._suppress_auto = True
-            row.btn.setChecked(True)
-            self._suppress_auto = False
-            self._auto_shown = key               # включили мы -> погасим при смене
-
-    def _on_zones_visible(self, visible: bool):
-        if visible and self._zones_key:
-            self._show_zones(self._zones_key)
-
-    def _show_zones(self, key: str):
-        af = self.areaflags
-        if not af:
-            return
-        zones = self._zones_cache.get(key)
-        if zones is None:
-            name = key.split(":", 1)[1]
-            zones = find_zones(af.plane(name), min_cells=2)   # одиночные ячейки — шум
-            self._zones_cache[key] = zones
-        self.zones_panel.show_zones(
-            key, key.split(":", 1)[1], zones, af.cell_size,
-            self.layer_color(key), self.layers_panel.row(key).btn.isChecked())
-        self.view.set_zone_labels(zones, af.cell_size, self.layer_color(key))
 
     # ---------- кисть (правки живут в памяти; запись файла — этап 12) ----------
 
@@ -909,9 +670,8 @@ class MainWindow(QMainWindow):
         в панели «Слои» — иначе не видно, по чему рисуешь."""
         if not self.areaflags or not key:
             return
-        self._auto_show_layer(key)               # покажет слой (временно) и погасит прошлый
-        if key not in self._layers_built:
-            self._build_layer(key)
+        self.layers.auto_show(key)               # покажет слой (временно) и погасит прошлый
+        self.layers.ensure_built(key)
         if self.view._brush_mode:
             self.layers_panel.set_active(key)
 
@@ -1052,9 +812,7 @@ class MainWindow(QMainWindow):
         self._dirty_cells = self.dirty_cells()
         self.brush_panel.set_history(*self.history.depth)
         self.brush_panel.set_dirty(self._dirty_cells)
-        self._zones_cache.clear()                # зоны считались по старым данным
-        self.zones_panel.clear()
-        self.view.set_zone_labels(None, 0.0, (0, 0, 0))
+        self.zones.invalidate()                  # зоны считались по старым данным
         self.refresh_stats()
 
     # ---------- экспорт ----------
@@ -1118,7 +876,7 @@ class MainWindow(QMainWindow):
                                            tr("dlg.csv_filter"))
         if not p:
             return
-        zones = self._zones_cache.get(key) or []
+        zones = self.zones.cached(key)
         with open(p, "w", encoding="utf-8", newline="") as f:
             f.write(zones_csv(zones, af.cell_size, key))
         self.statusBar().showMessage(tr("export.csv_done", n=len(zones), file=p), 8000)
@@ -1365,39 +1123,7 @@ class MainWindow(QMainWindow):
         self.settings.save()
         self.language_changed.emit(lang)         # app.py пересоздаст окно
 
-    def on_inspector_toggled(self, active: bool):
-        if not active:
-            self.view.clear_marker()             # точка принадлежит инспектору слоёв
 
-    def on_objects_toggled(self, active: bool):
-        if not active:
-            self.view.set_selected_building(None)   # подсветка — инспектору объектов
-
-    def on_layer_color_clicked(self, key: str):
-        c = QColorDialog.getColor(QColor(*self.layer_color(key)), self,
-                                  tr("color_dlg.title", name=key.split(":", 1)[1]))
-        if c.isValid():
-            self.apply_layer_color(key, (c.red(), c.green(), c.blue()))
-
-    def apply_layer_color(self, key: str, rgb: tuple[int, int, int]):
-        m = self.current_mission()
-        if not m:
-            return
-        self.settings.set_layer_color(m.name, key, rgb)
-        self.settings.save()
-        if key.startswith("terr:"):
-            self.territories_panel.row(key).set_color(rgb)
-            self.view.set_territory_color(key, rgb)
-            return
-        panel = self.objects_layers if key.startswith("obj:") else self.layers_panel
-        panel.row(key).set_color(rgb)
-        if key.startswith("obj:"):
-            self.view.set_buildings_color(key, rgb)
-            return
-        if key in self._layers_built:            # перекрасить уже построенный слой
-            self._build_layer(key)               # set_overlay сохранит видимость
-        if key == self.zones_panel.layer_key:    # подписи зон — в цвете своего слоя
-            self.view.set_zone_labels_color(rgb)
 
     # ---------- статус ----------
 
