@@ -404,57 +404,58 @@ class MainWindow(QMainWindow):
         except RuntimeError:
             pass                                 # окно уже разрушается (выход из приложения)
 
-    def _ensure_dock_visible(self, dock: QDockWidget):
-        """Открытый тоглом док возвращается туда, где жил; иначе — плавающим у центра."""
+    def _on_screen(self, rect) -> bool:
         from PySide6.QtGui import QGuiApplication
+        return any(rect.intersects(s.availableGeometry())
+                   for s in QGuiApplication.screens())
 
-        def on_screen(rect) -> bool:
-            return any(rect.intersects(s.availableGeometry())
-                       for s in QGuiApplication.screens())
-
+    def _ensure_dock_visible(self, dock: QDockWidget):
+        """Открытый тоглом док возвращается в свою группу вкладок; ПЛАВАЮЩИЙ без валидного
+        сохранённого положения — по центру окна (общее правило `_float_centered`)."""
         st = self._dock_state.get(dock.objectName())
         restored = False
-        if st:
-            if st["floating"]:
-                dock.setFloating(True)
-                if on_screen(st["geo"]):
-                    dock.setGeometry(st["geo"])
-                    restored = True
-            else:
-                partner = next(
-                    (self._docks[n] for n in st["tabs"]
-                     if n in self._docks and self._docks[n].isVisible()
-                     and not self._docks[n].isFloating()), None)
-                if partner is not None:              # вернуть в ту же группу вкладок
-                    self.tabifyDockWidget(partner, dock)
-                    restored = True
-                elif st["area"] != Qt.DockWidgetArea.NoDockWidgetArea:
-                    self.addDockWidget(st["area"], dock)
-                    restored = True
+        if st and not st["floating"]:                # вернуть в ту же группу вкладок / область
+            partner = next(
+                (self._docks[n] for n in st["tabs"]
+                 if n in self._docks and self._docks[n].isVisible()
+                 and not self._docks[n].isFloating()), None)
+            if partner is not None:
+                self.tabifyDockWidget(partner, dock)
+                restored = True
+            elif st["area"] != Qt.DockWidgetArea.NoDockWidgetArea:
+                self.addDockWidget(st["area"], dock)
+                restored = True
+        elif st and st["floating"] and self._on_screen(st["geo"]):
+            dock.setFloating(True)
+            dock.setGeometry(st["geo"])              # своё плавающее место, если на экране
+            restored = True
         if not restored:
-            ok = (on_screen(dock.frameGeometry()) if dock.isFloating()
-                  else dock.geometry().intersects(self.rect()))
-            if not ok:
-                self._float_centered(dock)
+            self._float_centered(dock)               # нет положения -> по центру окна
         dock.show()
         dock.raise_()
-        # таб-док иногда открывается ПОЗАДИ активной вкладки: raise_ до завершения раскладки
-        # Qt игнорирует. Повторяем показ+подъём отложенно, после того как layout устоялся.
-        QTimer.singleShot(0, lambda d=dock: self._raise_dock_deferred(d))
+        # Qt показывает док ПОСЛЕ этого (по устаревшей геометрии — иногда за пределами окна),
+        # и таб-док может встать позади активной вкладки. Проверяем/чиним отложенно.
+        QTimer.singleShot(0, lambda d=dock: self._place_dock_if_needed(d))
 
-    def _raise_dock_deferred(self, dock: QDockWidget):
+    def _place_dock_if_needed(self, dock: QDockWidget):
+        """После показа Qt: плавающий док вне экрана — вернуть по центру окна; поднять."""
         try:
+            if dock.isFloating() and not self._on_screen(dock.frameGeometry()):
+                self._float_centered(dock)
             dock.show()
             dock.raise_()
         except RuntimeError:
-            pass                                 # окно уже разрушено
+            pass                                     # окно уже разрушено
 
     def _float_centered(self, dock: QDockWidget):
-        """Состояние не восстановить — плавающее окно ближе к центру главного окна."""
+        """ОБЩЕЕ ПРАВИЛО для доков без сохранённого положения: плавающее окно по центру
+        главного окна, с небольшим смещением ВЛЕВО, высотой ~300 px — всегда видно."""
         dock.setFloating(True)
-        w0, h0 = max(300, dock.width()), max(360, dock.height())
-        c = self.geometry().center()
-        dock.setGeometry(c.x() - w0 // 2, c.y() - h0 // 2, w0, h0)
+        width = max(320, dock.width())
+        height = 300
+        center = self.frameGeometry().center()
+        dock.setGeometry(center.x() - width // 2 - 60, center.y() - height // 2,
+                         width, height)
 
     # ---------- рабочий каталог ----------
 
