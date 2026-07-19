@@ -65,16 +65,18 @@ plugins =
 macos.permissions = 
 
 # mode of using nuitka. accepts standalone or onefile. default = onefile
-# onefile — один .exe (распаковывается во временную папку при запуске). Для onedir-сборки
-# (быстрее старт, ассеты рядом лежат файлами) поставь standalone.
+# onefile = one .exe (unpacks to a temp dir on launch). For onedir (faster start, assets
+# sit next to the exe as loose files) set: mode = standalone
 mode = onefile
 
 # specify any extra nuitka arguments
-#  --include-data-dir=SRC=DEST — кладём ассеты в бандл (читаются через core.paths):
-#     i18n (тексты интерфейса) и buildings (footprint-датасет) — маленькие и обязательные.
-#     Тайлы подложки (assets/tiles ~108 МБ) НЕ бандлим: пользователь распаковывает их из
-#     игры в %LOCALAPPDATA%/M4DayZCEMapEditor/tiles (или кладёт туда готовую пирамиду).
-#  --include-package=paramiko — чтобы работала загрузка через SFTP (иначе вкладка отключена).
+#  --include-data-dir=SRC=DEST : bundle assets read via core.paths.
+#     i18n (UI strings) and buildings (footprint dataset) are tiny and REQUIRED.
+#     Satellite tiles (assets/tiles ~108 MB) are NOT bundled: the user unpacks them from the
+#     game into %LOCALAPPDATA%/M4DayZCEMapEditor/tiles (or drops a ready pyramid there).
+#  --include-package=paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
+#     If the build fails on the 'cryptography' dependency, drop this arg (SFTP off, rest works).
+# NOTE: keep this file ASCII-only — pyside6-deploy reads the spec as cp1252, not utf-8.
 extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/i18n=assets/i18n --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/buildings=assets/buildings --include-package=paramiko
 
 [buildozer]
