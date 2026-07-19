@@ -222,6 +222,9 @@ class MainWindow(QMainWindow):
         self.dock_brush = QDockWidget(tr("dock.brush"), self)
         self.dock_brush.setObjectName("dock_brush")
         self.dock_brush.setWidget(self._dock_widget(self.brush_panel))
+        # панель кисти скрыта (закрыта/переключена на другую вкладку) — выходим из режима
+        # рисования, чтобы ЛКМ не красила «вслепую»
+        self.dock_brush.visibilityChanged.connect(self._on_brush_visibility)
         self.view.stroke_started.connect(self.on_stroke_started)
         self.view.paint_world.connect(self.on_paint)
         self.view.stroke_finished.connect(self.on_stroke_finished)
@@ -657,6 +660,11 @@ class MainWindow(QMainWindow):
                 self.on_brush_layer(key)
             self.dock_brush.show()
             self.dock_brush.raise_()
+
+    def _on_brush_visibility(self, visible: bool):
+        """Док кисти скрыли (закрыли/ушли на другую вкладку) — выключаем режим рисования."""
+        if not visible and self.brush_panel.sw_mode.isChecked():
+            self.brush_panel.sw_mode.setChecked(False)   # -> on_brush_mode(False)
 
     def on_brush_layer(self, key: str):
         """Активный слой кисти (выбран в списке панели «Кисть»): временно показываем его
