@@ -50,6 +50,11 @@ class MapView(QGraphicsView):
         # «рукой». Курсор везде обычный — по просьбе владельца.
         self.setDragMode(QGraphicsView.NoDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        # Скроллбары не показываем: пан делаем вручную через setValue (диапазон есть за счёт
+        # полей PAN_MARGIN и без видимой полосы). Иначе у границы вписывания скроллбары
+        # мигают, меняют размер вьюпорта и карта «дёргается» между двумя состояниями.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMouseTracking(True)
         # фон за пределами мира — в тон окна приложения
         self.setBackgroundBrush(self.palette().color(QPalette.ColorRole.Window))
