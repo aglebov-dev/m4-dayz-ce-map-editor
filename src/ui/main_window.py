@@ -436,7 +436,18 @@ class MainWindow(QMainWindow):
                   else dock.geometry().intersects(self.rect()))
             if not ok:
                 self._float_centered(dock)
+        dock.show()
         dock.raise_()
+        # таб-док иногда открывается ПОЗАДИ активной вкладки: raise_ до завершения раскладки
+        # Qt игнорирует. Повторяем показ+подъём отложенно, после того как layout устоялся.
+        QTimer.singleShot(0, lambda d=dock: self._raise_dock_deferred(d))
+
+    def _raise_dock_deferred(self, dock: QDockWidget):
+        try:
+            dock.show()
+            dock.raise_()
+        except RuntimeError:
+            pass                                 # окно уже разрушено
 
     def _float_centered(self, dock: QDockWidget):
         """Состояние не восстановить — плавающее окно ближе к центру главного окна."""

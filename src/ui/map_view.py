@@ -316,17 +316,20 @@ class MapView(QGraphicsView):
         if self._sel_item:
             self.scene().removeItem(self._sel_item)
             self._sel_item = None
-        if not self._sel_world:
-            return
-        x0, z0, x1, z1 = self._sel_world
-        margin = self._meta.margin if self._meta else 0
-        rect = QRectF(margin + x0, margin + (self._world_size - z1),
-                      max(1.0, x1 - x0), max(1.0, z1 - z0))
-        pen = QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine)
-        pen.setCosmetic(True)                    # 2 px на экране при любом зуме
-        self._sel_item = self.scene().addRect(rect, pen,
-                                              QBrush(QColor(255, 255, 255, 30)))
-        self._sel_item.setZValue(44)             # под рамкой карты и маркером
+        if self._sel_world:
+            x0, z0, x1, z1 = self._sel_world
+            margin = self._meta.margin if self._meta else 0
+            rect = QRectF(margin + x0, margin + (self._world_size - z1),
+                          max(1.0, x1 - x0), max(1.0, z1 - z0))
+            pen = QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)                # 2 px на экране при любом зуме
+            self._sel_item = self.scene().addRect(rect, pen,
+                                                  QBrush(QColor(255, 255, 255, 30)))
+            self._sel_item.setZValue(44)         # под рамкой карты и маркером
+        # рамка тянется/снимается часто, а перо косметическое: при MinimalViewportUpdate
+        # старая рамка не всегда перерисовывается (остаются «хвосты»). Полная перерисовка
+        # вьюпорта на изменение выделения убирает артефакты.
+        self.viewport().update()
 
     # ---------- кисть ----------
 

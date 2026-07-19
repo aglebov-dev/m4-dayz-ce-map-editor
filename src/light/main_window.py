@@ -161,13 +161,23 @@ class LightMainWindow(MainWindow):
         main_toolbar.insertWidget(first, self.button_snapshot)
         main_toolbar.insertSeparator(first)
 
+        # BI-экспорт — в общей группе с основными кнопками (а не у правого края)
         self.button_bi_export = QToolButton()
         self.button_bi_export.setText("Экспорт в BI…")
         self.button_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
                                       "cfglimits + TGA-слои по флагам + проект XML")
         self.button_bi_export.clicked.connect(self.export_to_bi)
         self.button_bi_export.setEnabled(False)
-        main_toolbar.addWidget(self.button_bi_export)
+        main_toolbar.insertWidget(first, self.button_bi_export)
+
+        # язык — сразу за BI (был у правого края за спейсером): всё идёт друг за другом
+        lang_action = next((a for a in main_toolbar.actions()
+                            if main_toolbar.widgetForAction(a) is self.cmb_lang), None)
+        if lang_action is not None:
+            main_toolbar.removeAction(lang_action)   # прячет виджет — вернём show() ниже
+        new_lang_action = main_toolbar.insertWidget(first, self.cmb_lang)
+        new_lang_action.setVisible(True)
+        self.cmb_lang.setVisible(True)               # removeAction скрыл — показываем явно
 
         # добавление/удаление флагов — в панели «Слои» (заголовки секций и строки)
         self.layers_panel.allow_add_flag = True
