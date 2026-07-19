@@ -1,0 +1,1 @@
+pyside6-deploy -c pysidedeploy.spec --keep-deployment-files
