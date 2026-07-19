@@ -24,8 +24,7 @@ DOCK_TOOL = {
     "dock_layers": "map", "dock_inspector": "map", "dock_brush": "map",
     "dock_zones": "map", "dock_stats": "map",
     "dock_diff": "map", "dock_ce": "map",
-    "dock_obj_layers": "objects", "dock_objects": "objects",
-    "dock_buildings": "objects",   # контуры зданий — те же файлы, что «Объекты»
+    "dock_buildings": "objects", "dock_objects": "objects",   # слои зданий + инспектор
     "dock_items": "economy", "dock_loot": "economy",
     # территории убраны из лёгкого редактора: env/*.xml не материализуются (панель пуста)
 }

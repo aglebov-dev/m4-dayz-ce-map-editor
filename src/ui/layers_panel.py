@@ -5,8 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QSlider, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractButton, QComboBox, QHBoxLayout, QLabel, QScrollArea, QSlider,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.areaflags import AreaFlags
@@ -248,43 +248,49 @@ class LayersPanel(QWidget):
         self._list_lay.addWidget(row)
 
 
-class ObjectsLayersPanel(LayersPanel):
-    """Отдельная панель слоёв объектов (здания по флагам). Тот же контракт сигналов.
-    Ключи строк — `obj:…` (общие с фичей «Здания»); отличаются только заголовок раздела
-    и свой слайдер прозрачности (см. `_header_key`/`_opacity_tip_key`)."""
-
-    _header_key = "layers.objects"
-    _opacity_tip_key = "layers.obj_opacity_tip"
-
-    def _init_sliders(self):
-        self.sld_obj = self._make_slider("obj:", 100, tr(self._opacity_tip_key))
-
-    def opacity(self, prefix: str) -> float:
-        return self.sld_obj.value() / 100.0
-
-    def populate(self, objects: list[tuple[str, str, tuple[int, int, int], int]]):
-        """objects: (key, имя, цвет, счётчик)."""
-        self.clear()
-        if objects:
-            self._add_header(tr(self._header_key), "obj:")
-            self._list_lay.addWidget(self.sld_obj)
-            for key, name, color, count in objects:
-                self._add_row(key, name, color, count)
-        self._list_lay.addStretch(1)
+_MODES = ("points", "contour", "both")           # индексы cmb_mode ↔ режимы отображения
 
 
-class BuildingsLayersPanel(ObjectsLayersPanel):
-    """Слои контуров зданий (footprint). Те же `obj:`-ключи и цвета, что у «Объектов»
-    (маркеры совпадают), но свой заголовок и ДВА слайдера прозрачности: заливка (`obj:`)
-    и контур (`objborder:`) — раздельно, чтобы можно было убрать заливку и оставить рамки."""
+class BuildingsLayersPanel(LayersPanel):
+    """Панель слоёв зданий по флагам (ключи `obj:…`). Режим отображения (точки / контур /
+    точки+контур) — переключателем сверху; три раздельных слайдера прозрачности: точки
+    (`objpoints:`), заливка контура (`obj:`), обводка контура (`objborder:`)."""
 
-    _header_key = "layers.buildings"
-    _opacity_tip_key = "layers.bld_opacity_tip"
+    mode_changed = Signal(str)                    # "points" | "contour" | "both"
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout().insertWidget(0, self._mode_row())   # переключатель — над списком слоёв
 
     def _init_sliders(self):
-        self.sld_obj = self._make_slider("obj:", 100, tr(self._opacity_tip_key))
+        self.sld_points = self._make_slider("objpoints:", 100,
+                                            tr("layers.bld_points_opacity_tip"))
+        self.sld_obj = self._make_slider("obj:", 100, tr("layers.bld_opacity_tip"))
         self.sld_border = self._make_slider("objborder:", 100,
                                             tr("layers.bld_border_opacity_tip"))
+
+    def opacity(self, prefix: str) -> float:
+        return self.sld_obj.value() / 100.0       # заливка контура (совместимость сигнатуры)
+
+    def _mode_row(self) -> QWidget:
+        self.cmb_mode = QComboBox()
+        self.cmb_mode.addItems([tr("bld.mode_points"), tr("bld.mode_contour"),
+                                tr("bld.mode_both")])
+        self.cmb_mode.setCurrentIndex(1)          # по умолчанию — контур
+        self.cmb_mode.currentIndexChanged.connect(
+            lambda i: self.mode_changed.emit(_MODES[i]))
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(4, 4, 4, 0)
+        lay.addWidget(QLabel(tr("bld.mode")))
+        lay.addWidget(self.cmb_mode, 1)
+        return row
+
+    def mode(self) -> str:
+        return _MODES[self.cmb_mode.currentIndex()]
+
+    def points_opacity(self) -> float:
+        return self.sld_points.value() / 100.0
 
     def border_opacity(self) -> float:
         return self.sld_border.value() / 100.0
@@ -292,8 +298,10 @@ class BuildingsLayersPanel(ObjectsLayersPanel):
     def populate(self, objects: list[tuple[str, str, tuple[int, int, int], int]]):
         self.clear()
         if objects:
-            self._add_header(tr(self._header_key), "obj:")
+            self._add_header(tr("layers.buildings"), "obj:")
             # подписи-транзиенты (пересоздаются при populate); сами слайдеры — постоянные
+            self._list_lay.addWidget(QLabel(tr("layers.bld_points")))
+            self._list_lay.addWidget(self.sld_points)
             self._list_lay.addWidget(QLabel(tr("layers.bld_fill")))
             self._list_lay.addWidget(self.sld_obj)
             self._list_lay.addWidget(QLabel(tr("layers.bld_border")))

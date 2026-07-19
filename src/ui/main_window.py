@@ -42,21 +42,18 @@ from ui.flow_layout import FlowLayout
 from ui.diff_panel import DiffPanel
 from ui.inspector_panel import InspectorPanel
 from ui.items_panel import ItemsPanel
-from ui.layers_panel import LayersPanel, ObjectsLayersPanel, TerritoriesPanel
+from ui.layers_panel import LayersPanel, TerritoriesPanel
 from ui.app_bus import AppBus
 from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
-from ui.objects_presenter import ObjectsPresenter
 from ui.buildings_presenter import BuildingsPresenter
 from ui.items_presenter import ItemsPresenter
 from ui.territories_presenter import TerritoriesPresenter
 from common.buildings import BuildingsModel
 from core.building_index import load_index
 from common.layer_colors import LayerColors
-from ui.loot_panel import LootPanel
 from ui.map_view import MapView
-from ui.objects_panel import ObjectsInspectorPanel
 from ui.overlays import (
     build_diff_pixmap, rgba_to_pixmap, tier_color, usage_color,
 )
@@ -122,7 +119,6 @@ class MainWindow(QMainWindow):
         tb.addWidget(self.cmb_lang)
 
         self.view = MapView(self)
-        self.view.cluster_mode = self.settings.cluster_mode   # merged | per-layer (v1)
         self.setCentralWidget(self.view)
         self.view.cursor_world.connect(self.on_cursor)
 
@@ -152,21 +148,17 @@ class MainWindow(QMainWindow):
         self.layers_panel = self.layers.panel        # алиас для смежного кода (кисть/инспектор)
         self.dock_layers = self.layers.dock          # для реестра доков и расстановки
 
-        # === фича «Объекты» (obj-слои + инспектор объектов + спавн): ui/objects_presenter.py ===
-        self.objects = ObjectsPresenter(
-            self, view=self.view, colors=self.colors, settings=self.settings,
-            mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
-        self.loot_panel = self.objects.loot_panel        # алиас: нужен для лута по области
-        self.dock_obj_layers = self.objects.dock_layers
-        self.dock_objects = self.objects.dock_inspector
-        self.dock_loot = self.objects.dock_loot
-
-        # === фича «Здания» (контуры footprint; те же слои/цвета, своя прозрачность) ===
+        # === фича «Здания» (слои по флагам + инспектор здания + спавн; режим точки/контур/оба) ===
+        # бывшая фича «Объекты» слилась сюда: ui/buildings_presenter.py
         self.buildings_feature = BuildingsPresenter(
             self, view=self.view, colors=self.colors, settings=self.settings,
             mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
+        self.objects = self.buildings_feature            # алиас: клик по карте, is_active и т.п.
+        self.loot_panel = self.buildings_feature.loot_panel   # алиас: нужен для лута по области
         self.building_index = None                       # core.building_index.BuildingIndex | None
         self.dock_buildings = self.buildings_feature.dock
+        self.dock_objects = self.buildings_feature.dock_inspector
+        self.dock_loot = self.buildings_feature.dock_loot
 
         # === фича «Территории» (круги животных): ui/territories_presenter.py ===
         self.territories = TerritoriesPresenter(
@@ -278,7 +270,7 @@ class MainWindow(QMainWindow):
         self.tb_tools = QToolBar("tools")
         self.tb_tools.setMovable(False)
         self.addToolBar(self.tb_tools)
-        for dock in (self.dock_layers, self.dock_obj_layers, self.dock_buildings,
+        for dock in (self.dock_layers, self.dock_buildings,
                      self.dock_brush, self.dock_territories, self.dock_items,
                      self.dock_zones, self.dock_stats, self.dock_diff, self.dock_ce,
                      self.dock_inspector, self.dock_objects, self.dock_loot):
@@ -310,14 +302,13 @@ class MainWindow(QMainWindow):
         return sa
 
     def _default_dock_layout(self):
-        """Компоновка по умолчанию: слева Слои над Объектами; справа сверху вкладки
-        Предметы|Спавн|Зоны, снизу вкладки Инспектор объектов|Инспектор слоёв."""
+        """Компоновка по умолчанию: слева Слои над Зданиями; справа сверху вкладки
+        Предметы|Спавн|Зоны, снизу вкладки Инспектор здания|Инспектор слоёв."""
         L, R = Qt.DockWidgetArea.LeftDockWidgetArea, Qt.DockWidgetArea.RightDockWidgetArea
         V = Qt.Orientation.Vertical
         self.addDockWidget(L, self.dock_layers)
-        self.addDockWidget(L, self.dock_obj_layers)
-        self.splitDockWidget(self.dock_layers, self.dock_obj_layers, V)
-        self.tabifyDockWidget(self.dock_obj_layers, self.dock_buildings)
+        self.addDockWidget(L, self.dock_buildings)
+        self.splitDockWidget(self.dock_layers, self.dock_buildings, V)
         self.tabifyDockWidget(self.dock_buildings, self.dock_brush)
         self.tabifyDockWidget(self.dock_brush, self.dock_territories)
         self.addDockWidget(R, self.dock_items)
@@ -331,7 +322,7 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.dock_objects, self.dock_inspector)
         self.resizeDocks([self.dock_layers, self.dock_items], [280, 330],
                          Qt.Orientation.Horizontal)
-        self.resizeDocks([self.dock_layers, self.dock_obj_layers], [400, 400], V)
+        self.resizeDocks([self.dock_layers, self.dock_buildings], [400, 400], V)
         self.resizeDocks([self.dock_items, self.dock_objects], [440, 340], V)
         self.dock_items.raise_()
         self.dock_objects.raise_()
@@ -568,8 +559,7 @@ class MainWindow(QMainWindow):
         self.items.clear()
         self.view.clear_overlays()
         self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
-        self.objects.clear()                     # obj-слои + инспектор объектов + спавн
-        self.buildings_feature.clear()           # слои контуров зданий (footprint)
+        self.buildings_feature.clear()           # слои зданий + инспектор здания + спавн
         self.zones.clear()
         self.view.clear_region()                 # выделение принадлежит прошлой карте
         self.stats_panel.clear()
@@ -610,8 +600,7 @@ class MainWindow(QMainWindow):
         if model and self.types is not None:
             self.items.populate(self.types)
         self.layers.populate(af)                 # презентер сам считает counts и цвета
-        self.objects.populate(af, model)         # obj-слои: счётчики из модели, цвета из common
-        self.buildings_feature.populate(af, model, self.building_index)   # контуры footprint
+        self.buildings_feature.populate(af, model, self.building_index)   # слои + инспектор
         self._load_territories(m)
         self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
                                   + [(f"usage:{n}", n) for n in af.usages])
@@ -648,8 +637,7 @@ class MainWindow(QMainWindow):
         if want_layers:
             self.inspector.show_at(x, z, af, colors, visible, water=self._water_at(x, z))
         if want_objects:
-            index = self.objects.show_building_at(x, z, af, colors, visible)
-            self.buildings_feature.select_building(index)   # тот же footprint — красным
+            self.buildings_feature.show_building_at(x, z, af, colors, visible)
 
 
     def on_layer_selected(self, key: str):

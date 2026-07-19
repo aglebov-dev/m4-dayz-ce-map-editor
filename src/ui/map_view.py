@@ -13,7 +13,7 @@ from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsScene, QGraphicsVie
 CLICK_SLOP_PX = 4
 
 from core.tiles import TileMeta, iter_zoom_tiles
-from ui.buildings_item import BuildingsItem, ClustersItem
+from ui.buildings_item import BuildingsItem
 from ui.footprints_item import FootprintsItem
 from ui.shape_item import GRAB_PX, ShapeItem
 from ui.territories_item import TerritoriesItem
@@ -69,9 +69,8 @@ class MapView(QGraphicsView):
         self._marker: QGraphicsEllipseItem | None = None
         self._marker_world: tuple[float, float] | None = None
         self._border = None
-        # слои зданий: key -> {"x","z","color","idx","item","visible"}
+        # слои точек зданий: key -> {"x","z","color","idx","item","visible"}
         self._bld_layers: dict[str, dict] = {}
-        self._bld_clusters: ClustersItem | None = None   # общий слой кластеров
         # территории животных: key -> {"x","z","r","color","item","visible"}
         self._terr_layers: dict[str, dict] = {}
         self._terr_opacity = 1.0
@@ -106,8 +105,6 @@ class MapView(QGraphicsView):
         self._drag_from = None                   # точка сцены для переноса фигуры
         # ПКМ занята паном — контекстное меню на карте не нужно
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        # "merged" — единые кружки (v2); "per-layer" — каждый слой в своём кружке (v1)
-        self.cluster_mode = "merged"
         self._content = None                     # QRectF карты (сцена шире на поля пана)
         # «режим вписывания»: пока пользователь не зумил, карта следует за размером окна.
         # Надёжнее геометрической проверки: стартовый fit до show() мог пройти при неверном
@@ -462,7 +459,7 @@ class MapView(QGraphicsView):
         self.scene().addItem(item)
         self._zone_labels = item
 
-    # ---------- здания (несколько слоёв: все / по флагам) ----------
+    # ---------- здания: точки (несколько слоёв: все / по флагам) ----------
 
     def set_buildings(self, key: str, x, z, color: tuple[int, int, int], indices=None):
         """Слой точек зданий. indices — глобальные индексы инстансов (для выделения).
@@ -471,7 +468,6 @@ class MapView(QGraphicsView):
         if old and old["item"]:
             self.scene().removeItem(old["item"])
         if x is None:
-            self._rebuild_clusters()
             return
         visible = old["visible"] if old else False
         self._bld_layers[key] = {"x": x, "z": z, "color": color, "idx": indices,
@@ -490,7 +486,6 @@ class MapView(QGraphicsView):
         bl["visible"] = b
         if bl["item"]:
             bl["item"].setVisible(b)
-        self._rebuild_clusters()
 
     def set_buildings_color(self, key: str, color: tuple[int, int, int]):
         bl = self._bld_layers.get(key)
@@ -499,16 +494,13 @@ class MapView(QGraphicsView):
         bl["color"] = color
         if bl["item"]:
             bl["item"].set_color(color)
-        self._rebuild_clusters()
 
     def set_buildings_opacity(self, v: float):
-        """Общая прозрачность всех слоёв зданий (слайдер секции «Объекты»)."""
+        """Прозрачность всех слоёв точек зданий (слайдер «точки» секции «Здания»)."""
         self._bld_opacity = v
         for bl in self._bld_layers.values():
             if bl["item"]:
                 bl["item"].setOpacity(v)
-        if self._bld_clusters:
-            self._bld_clusters.setOpacity(v)
 
     def set_selected_building(self, index: int | None):
         """Подсветить отметку здания ВО ВСЕХ слоях, где оно есть (глобальный индекс)."""
@@ -516,7 +508,6 @@ class MapView(QGraphicsView):
         for bl in self._bld_layers.values():
             if bl["item"]:
                 bl["item"].set_selected(self._local_selected(bl))
-        self._rebuild_clusters()
 
     def _local_selected(self, bl: dict) -> int | None:
         """Глобальный выделенный индекс -> позиция в подслое (или None)."""
@@ -532,49 +523,13 @@ class MapView(QGraphicsView):
         if bl["item"]:
             self.scene().removeItem(bl["item"])
         margin = self._meta.margin if self._meta else 0
-        item = BuildingsItem(bl["x"], bl["z"], self._world_size, margin, bl["color"],
-                             per_layer_clusters=(self.cluster_mode == "per-layer"))
+        item = BuildingsItem(bl["x"], bl["z"], self._world_size, margin, bl["color"])
         item.setZValue(30)
         item.setVisible(bl["visible"])
         item.setOpacity(self._bld_opacity)
         item.set_selected(self._local_selected(bl))
         self.scene().addItem(item)
         bl["item"] = item
-        self._rebuild_clusters()
-
-    def _rebuild_clusters(self):
-        """Общий слой кластеров: уникальные здания ВИДИМЫХ слоёв, без дублей."""
-        import numpy as np
-        if self.cluster_mode != "merged":        # per-layer: слои рисуют кружки сами
-            if self._bld_clusters:
-                self.scene().removeItem(self._bld_clusters)
-                self._bld_clusters = None
-            return
-        if self._bld_clusters is None:
-            self._bld_clusters = ClustersItem(self._world_size,
-                                              self._meta.margin if self._meta else 0)
-            self._bld_clusters.setZValue(32)
-            self._bld_clusters.setOpacity(self._bld_opacity)
-            self.scene().addItem(self._bld_clusters)
-        xs, zs, ids = [], [], []
-        for bl in self._bld_layers.values():
-            if bl["visible"] and len(bl["x"]):
-                xs.append(bl["x"])
-                zs.append(bl["z"])
-                ids.append(bl["idx"] if bl["idx"] is not None
-                           else np.arange(len(bl["x"])))
-        if not xs:
-            self._bld_clusters.set_data(np.empty(0), np.empty(0), None)
-            return
-        all_ids = np.concatenate(ids)
-        uniq, first = np.unique(all_ids, return_index=True)
-        ux = np.concatenate(xs)[first]
-        uz = np.concatenate(zs)[first]
-        sel = None
-        if self._bld_selected is not None:
-            pos = np.flatnonzero(uniq == self._bld_selected)
-            sel = int(pos[0]) if len(pos) else None
-        self._bld_clusters.set_data(ux, uz, sel)
 
     # ---------- контуры зданий (footprint; фича «Здания») ----------
 

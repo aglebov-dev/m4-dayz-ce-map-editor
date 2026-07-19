@@ -1,9 +1,12 @@
-"""Инспектор объектов: клик выбирает БЛИЖАЙШЕЕ здание в радиусе; его эффективные
-тиры/usage — строками со свитчами, один в один как в инспекторе слоёв."""
+"""Инспектор зданий: показывает эффективные тиры/usage выбранного здания (свитчи, как в
+инспекторе слоёв). Если в точке клика несколько зданий (высотки/наложение контуров) —
+сверху появляется список-переключатель, по которому листаем конкретное здание."""
 from __future__ import annotations
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QComboBox, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+)
 
 from core.areaflags import AreaFlags
 from core.i18n import tr
@@ -11,8 +14,12 @@ from ui.inspector_panel import FlagRow
 from ui.layers_panel import Switch
 
 
-class ObjectsInspectorPanel(QWidget):
-    layer_toggle_requested = Signal(str, bool)   # (ключ слоя, видимость) — как у инспектора слоёв
+class BuildingInspectorPanel(QWidget):
+    """Сигналы: layer_toggle_requested(key, visible) — как у инспектора слоёв;
+    building_picked(index) — выбрано конкретное здание из списка кандидатов."""
+
+    layer_toggle_requested = Signal(str, bool)   # (ключ слоя, видимость)
+    building_picked = Signal(int)                # глобальный индекс выбранного здания
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -23,6 +30,11 @@ class ObjectsInspectorPanel(QWidget):
         head.addWidget(QLabel(tr("inspector.toggle")))
         head.addStretch(1)
 
+        # переключатель кандидатов (несколько зданий в точке клика)
+        self.cmb_pick = QComboBox(self)
+        self.cmb_pick.currentIndexChanged.connect(self._on_pick)
+        self.cmb_pick.hide()
+
         self.info = QLabel(tr("objects.hint"))
         self.info.setWordWrap(True)
         self.info.setTextFormat(Qt.TextFormat.RichText)
@@ -30,12 +42,15 @@ class ObjectsInspectorPanel(QWidget):
         self._flags_lay = QVBoxLayout()
         self._flags_lay.setSpacing(0)
         self._rows: list[FlagRow] = []
-        self._last: tuple | None = None          # (b, af, colors)
+        self._cands: list[dict] = []             # кандидаты (инфо-дикты) в точке клика
+        self._af: AreaFlags | None = None
+        self._colors: dict = {}
         self._visible: dict[str, bool] = {}
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(6, 6, 6, 6)
         lay.addLayout(head)
+        lay.addWidget(self.cmb_pick)
         lay.addWidget(self.info)
         lay.addLayout(self._flags_lay)
         lay.addStretch(1)
@@ -44,19 +59,26 @@ class ObjectsInspectorPanel(QWidget):
         return self.sw_active.isChecked()
 
     def clear(self):
-        self._last = None
+        self._cands = []
+        self._set_combo([])
         self._clear_rows()
         self.info.setText(tr("objects.hint"))
 
     # ---------- данные ----------
 
-    def show_building(self, b: dict | None, af: AreaFlags,
-                      colors: dict[str, tuple[int, int, int]],
-                      visible: dict[str, bool] | None = None):
+    def show_buildings(self, cands: list[dict], af: AreaFlags,
+                       colors: dict[str, tuple[int, int, int]],
+                       visible: dict[str, bool] | None = None):
+        """cands — список инфо-диктов зданий в точке клика (пустой = «рядом ничего»)."""
         if visible is not None:
             self._visible = dict(visible)
-        self._last = (b, af, colors)
-        self._rebuild()
+        self._af = af
+        self._colors = colors
+        self._cands = cands
+        self._set_combo(cands)
+        self._rebuild()                          # покажет первого (или «пусто»)
+        if cands:
+            self.building_picked.emit(cands[0]["index"])
 
     def update_layer_state(self, key: str, visible: bool):
         """Синхронизация из панели слоёв (в т.ч. эхо собственного тогла)."""
@@ -66,6 +88,28 @@ class ObjectsInspectorPanel(QWidget):
             row.sw.blockSignals(True)
             row.sw.setChecked(visible)
             row.sw.blockSignals(False)
+
+    # ---------- список кандидатов ----------
+
+    def _set_combo(self, cands: list[dict]):
+        self.cmb_pick.blockSignals(True)
+        self.cmb_pick.clear()
+        for c in cands:
+            self.cmb_pick.addItem(f"{c['name']}  ({c['dist']:.1f} m)")
+        self.cmb_pick.setCurrentIndex(0 if cands else -1)
+        self.cmb_pick.blockSignals(False)
+        self.cmb_pick.setVisible(len(cands) > 1)   # список — только когда есть из чего выбирать
+
+    def _on_pick(self, i: int):
+        if 0 <= i < len(self._cands):
+            self._rebuild()
+            self.building_picked.emit(self._cands[i]["index"])
+
+    def _current(self) -> dict | None:
+        i = self.cmb_pick.currentIndex()
+        if 0 <= i < len(self._cands):
+            return self._cands[i]
+        return self._cands[0] if self._cands else None
 
     # ---------- отрисовка ----------
 
@@ -78,12 +122,11 @@ class ObjectsInspectorPanel(QWidget):
 
     def _rebuild(self):
         self._clear_rows()
-        if not self._last:
-            return
-        b, af, colors = self._last
+        b = self._current()
         if b is None:
             self.info.setText(f"<i>{tr('objects.empty')}</i>")
             return
+        af, colors = self._af, self._colors
         self.info.setText(
             f"<b>{b['name']}</b><br>"
             f"X {b['x']:.1f}&nbsp;&nbsp;Z {b['z']:.1f}<br>"

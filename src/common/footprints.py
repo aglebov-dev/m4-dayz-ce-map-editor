@@ -63,3 +63,20 @@ def oriented_corners(x, z, names: list[str], yaws, index) -> tuple[np.ndarray, n
     north = z[keep_arr, None] - px * sin[:, None] + pz * cos[:, None]
     corners = np.stack([east, north], axis=-1)                  # (M, 4, 2)
     return corners, keep_arr
+
+
+def footprints_containing(corners: np.ndarray, x: float, z: float) -> np.ndarray:
+    """Индексы (строки в corners) прямоугольников footprint, содержащих точку (x, z).
+
+    Прямоугольники выпуклые → точка внутри, если лежит с одной стороны всех 4 рёбер
+    (знак векторного произведения ребра и вектора на точку одинаков). Векторно по M.
+    """
+    if len(corners) == 0:
+        return np.empty(0, dtype=np.int64)
+    v = corners                                   # (M, 4, 2)
+    vn = np.roll(v, -1, axis=1)                   # следующая вершина ребра
+    ex, ez = vn[..., 0] - v[..., 0], vn[..., 1] - v[..., 1]
+    px, pz = x - v[..., 0], z - v[..., 1]
+    cross = ex * pz - ez * px                      # (M, 4)
+    inside = np.all(cross >= 0, axis=1) | np.all(cross <= 0, axis=1)
+    return np.flatnonzero(inside)

@@ -77,22 +77,20 @@ class BuildingsModel:
             selection = np.flatnonzero(self.eff_u >> np.uint32(bit) & 1)
         return self.buildings.x[selection], self.buildings.z[selection], selection
 
-    def nearest(self, x: float, z: float, areaflags) -> dict | None:
-        """Ближайший лутабельный инстанс в радиусе + его эффективные флаги по формуле."""
+    def info_at_index(self, index: int, areaflags,
+                      from_xz: tuple[float, float] | None = None) -> dict:
+        """Полная инфо по инстансу (флаги/лут/позиция) для инспектора. `from_xz` — точка
+        клика для расчёта расстояния (иначе dist=0)."""
         b, af = self.buildings, areaflags
-        if b is None or af is None or not len(b.x):
-            return None
-        distances_sq = (b.x - x) ** 2 + (b.z - z) ** 2
-        index = int(np.argmin(distances_sq))
-        distance = float(distances_sq[index]) ** 0.5
-        if distance > BUILDING_PICK_M:
-            return None
         building_x, building_z = float(b.x[index]), float(b.z[index])
         proto = b.protos[b.names[index]]
         cell = int(building_z / af.cell_size) * af.grid_x + int(building_x / af.cell_size)
         cell_usage, cell_tier = int(af.usage[cell]), int(af.tier[cell])
+        dist = 0.0
+        if from_xz is not None:
+            dist = ((building_x - from_xz[0]) ** 2 + (building_z - from_xz[1]) ** 2) ** 0.5
         return {
-            "index": index, "name": proto.name, "dist": distance,
+            "index": index, "name": proto.name, "dist": dist,
             "x": building_x, "z": building_z,
             "lootmax": proto.lootmax, "points": proto.points,
             "group_u": proto.usage_mask, "group_v": proto.value_mask,
@@ -100,6 +98,25 @@ class BuildingsModel:
             "eff_u": proto.usage_mask | cell_usage,      # usage группы ∪ ячейки
             "eff_v": cell_tier | proto.value_mask,       # тир ячейки ∪ value группы
         }
+
+    def nearest(self, x: float, z: float, areaflags) -> dict | None:
+        """Ближайший лутабельный инстанс в радиусе + его эффективные флаги по формуле."""
+        b, af = self.buildings, areaflags
+        if b is None or af is None or not len(b.x):
+            return None
+        distances_sq = (b.x - x) ** 2 + (b.z - z) ** 2
+        index = int(np.argmin(distances_sq))
+        if float(distances_sq[index]) ** 0.5 > BUILDING_PICK_M:
+            return None
+        return self.info_at_index(index, af, from_xz=(x, z))
+
+    def indices_near(self, x: float, z: float, radius: float) -> np.ndarray:
+        """Глобальные индексы инстансов в радиусе `radius` от точки (стек для высоток)."""
+        b = self.buildings
+        if b is None or not len(b.x):
+            return np.empty(0, dtype=np.int64)
+        d2 = (b.x - x) ** 2 + (b.z - z) ** 2
+        return np.flatnonzero(d2 <= radius * radius)
 
     def items_for(self, info: dict | None) -> list:
         """Предметы, которые могут заспавниться в выбранном здании (для спавн-панели)."""
