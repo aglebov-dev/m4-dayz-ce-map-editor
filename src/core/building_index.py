@@ -2,12 +2,15 @@
 
 Наработка ресерча (`dayz-research/DATA/buildings`): по каждому классу из mapgrouppos —
 ориентированный bounding box модели (footprint w×l, высота h, смещение центра ox/oz),
-по каждому инстансу — поворот (yaw). Здесь только чтение и быстрый доступ; геометрия
-контуров (углы прямоугольников) считается в `common.footprints`. Без Qt.
+по каждому инстансу — поворот `yaw_deg` = ИСТИННЫЙ модельный yaw (в датасете уже `90 − a`,
+где `a` — атрибут mapgrouppos). Здесь только чтение и быстрый доступ; геометрия контуров
+считается в `common.footprints` по каноничной формуле ресёрча. Без Qt.
 
 Имя класса в датасете == имя `<group name=...>` в mapgrouppos/mapgroupproto, поэтому
-footprint матчится к зданию по имени 1:1, а yaw — по имени и позиции (у ванильной карты
-позиции совпадают точно; у изменённой части зданий yaw не найдётся → 0, контур по осям).
+footprint матчится к зданию по имени 1:1, а yaw — по имени и БЛИЖАЙШЕЙ позиции (у ванильной
+карты позиции совпадают; у изменённого сервером здания берём поворот ближайшего ванильного
+той же модели). Точное округление позиции было хрупким (~16 % промахов на границах бакетов
+float32 → yaw=0 → развёрнутые здания), поэтому матчинг — по сетке с допуском (см. yaw()).
 """
 from __future__ import annotations
 
@@ -24,22 +27,40 @@ class Footprint:
     oz: float    # по Z
 
 
+# сторона ячейки грид-индекса поворотов (м) и допуск матчинга (м²). Округление до 0.1
+# было ХРУПКИМ: на границе .x5 float32-позиция загруженного mapgrouppos съезжала в соседний
+# бакет и yaw не находился у ~16% зданий → они рисовались с yaw=0 (развёрнуты). Теперь —
+# ближайший инстанс того же класса в радиусе TOL (ванильная позиция совпадает точно; чуть
+# сдвинутое сервером здание берёт поворот ближайшего ванильного той же модели).
+_CELL = 1.0
+_TOL2 = 2.5 * 2.5
+
+
 class BuildingIndex:
-    """footprint по имени класса + yaw по (имя, позиция). Один на мир."""
+    """footprint по имени класса + yaw по (имя, ближайшая позиция). Один на мир."""
 
     def __init__(self, world: str, world_size: int,
-                 footprints: dict[str, Footprint], yaws: dict[tuple, float]):
+                 footprints: dict[str, Footprint], grid: dict):
         self.world = world
         self.world_size = world_size
         self._footprints = footprints
-        self._yaws = yaws
+        self._grid = grid                # (name, ix, iz) -> list[(x, z, yaw)]
 
     def footprint(self, name: str) -> Footprint | None:
         return self._footprints.get(name)
 
     def yaw(self, name: str, x: float, z: float) -> float:
-        """Поворот инстанса (град). Ключ — округлённая позиция; нет совпадения → 0."""
-        return self._yaws.get((name, round(x, 1), round(z, 1)), 0.0)
+        """Поворот инстанса (град): ближайший в датасете того же класса в радиусе TOL;
+        нет — 0.0 (контур по осям)."""
+        ix, iz = int(round(x / _CELL)), int(round(z / _CELL))
+        best_yaw, best_d2 = 0.0, _TOL2
+        for dx in (-1, 0, 1):
+            for dz in (-1, 0, 1):
+                for px, pz, pyaw in self._grid.get((name, ix + dx, iz + dz), ()):
+                    d2 = (px - x) ** 2 + (pz - z) ** 2
+                    if d2 < best_d2:
+                        best_d2, best_yaw = d2, pyaw
+        return best_yaw
 
     def __bool__(self) -> bool:
         return bool(self._footprints)
@@ -61,9 +82,11 @@ def load_index(assets_dir, world: str) -> BuildingIndex | None:
         if fp:
             footprints[c["name"]] = Footprint(fp["w"], fp["l"],
                                               fp.get("ox", 0.0), fp.get("oz", 0.0))
-    yaws: dict[tuple, float] = {}
+    grid: dict = {}                    # (name, ix, iz) -> list[(x, z, yaw)]
     for cid, x, z, yaw in data.get("instances", []):
         cls = by_id.get(cid)
-        if cls is not None:
-            yaws[(cls["name"], round(x, 1), round(z, 1))] = yaw
-    return BuildingIndex(world, int(data.get("worldSize", 0)), footprints, yaws)
+        if cls is None:
+            continue
+        key = (cls["name"], int(round(x / _CELL)), int(round(z / _CELL)))
+        grid.setdefault(key, []).append((float(x), float(z), float(yaw)))
+    return BuildingIndex(world, int(data.get("worldSize", 0)), footprints, grid)

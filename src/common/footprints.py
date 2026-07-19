@@ -1,23 +1,23 @@
 """Геометрия контуров зданий: (позиция, имя класса) → углы ориентированного
 прямоугольника footprint в мировых координатах. Без Qt.
 
-    центр  = (x + ox, z + oz)
-    угол   = центр + Rz(90° − yaw)·(±w/2, ±l/2)
-Мир: X — восток, Z — север. Инверсию Z (север сверху) делает слой отображения.
+Каноничная формула ресёрча (DayZ-«компасная» матрица, проверена наложением на спутник),
+`yaw` — ИСТИННЫЙ модельный поворот из датасета (там уже `yaw_deg = 90 − a`, где `a` —
+атрибут mapgrouppos; поэтому здесь yaw берём как есть, без поправок):
 
-ВАЖНО про угол: `yaw` (атрибут `a` в mapgrouppos) — это КОМПАСНЫЙ курс DayZ (по часовой
-от севера), а не математический угол. В нашу CCW-от-востока формулу он переводится как
-(90° − yaw). Ресёрчевский `render_preview.py` брал yaw как есть и был визуально «ок» лишь
-потому, что валидировался при 10 м/пиксель — на этом масштабе разворот отдельного здания
-не виден. Проверено наложением на спутник (вагоны вдоль ж/д, дома по кровлям): (90−yaw)
-садит контуры точно на крыши, сырой yaw разворачивает часть зданий на 90°.
+    θ = radians(yaw)                       # 0 = север/+Z, по часовой
+    px, pz = lx + ox, lz + oz              # локальные оси: X=вправо=w, Z=вперёд=l
+    east   = x + px·cosθ + pz·sinθ
+    north  = z − px·sinθ + pz·cosθ
+
+Мир: X — восток, Z — север. Инверсию Z (север сверху) делает слой отображения.
 """
 from __future__ import annotations
 
 import numpy as np
 
 
-# порядок углов: ЮЗ, ЮВ, СВ, СЗ в локальных осях (знаки полуразмеров)
+# знаки полуразмеров для 4 углов: локальные X (w) и Z (l)
 _SX = np.array([-1.0, 1.0, 1.0, -1.0])
 _SZ = np.array([-1.0, -1.0, 1.0, 1.0])
 
@@ -53,14 +53,11 @@ def oriented_corners(x, z, names: list[str], index) -> tuple[np.ndarray, np.ndar
     keep_arr = np.array(keep, dtype=np.int64)
     hw = np.array(w) / 2.0
     hl = np.array(l) / 2.0
-    cx = x[keep_arr] + np.array(ox)
-    cz = z[keep_arr] + np.array(oz)
-    rad = np.radians(90.0 - np.array(yaw))     # yaw = компасный курс → CCW-от-востока
-
+    rad = np.radians(np.array(yaw))
     cos, sin = np.cos(rad), np.sin(rad)
-    dx = hw[:, None] * _SX[None, :]            # (M, 4)
-    dz = hl[:, None] * _SZ[None, :]
-    wx = cx[:, None] + dx * cos[:, None] - dz * sin[:, None]
-    wz = cz[:, None] + dx * sin[:, None] + dz * cos[:, None]
-    corners = np.stack([wx, wz], axis=-1)      # (M, 4, 2)
+    px = hw[:, None] * _SX[None, :] + np.array(ox)[:, None]     # (M, 4) локальный X + ox
+    pz = hl[:, None] * _SZ[None, :] + np.array(oz)[:, None]     # локальный Z + oz
+    east = x[keep_arr, None] + px * cos[:, None] + pz * sin[:, None]
+    north = z[keep_arr, None] - px * sin[:, None] + pz * cos[:, None]
+    corners = np.stack([east, north], axis=-1)                  # (M, 4, 2)
     return corners, keep_arr
