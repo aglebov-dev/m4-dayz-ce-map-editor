@@ -146,7 +146,8 @@ class BrushLayerList(QWidget):
 
 class BrushPanel(QWidget):
     """Сигналы: mode_toggled(on), tool_changed(kind), apply_shape(), cancel_shape(),
-    layer_changed(key), radius_changed(m), erase_toggled(on), undo/redo_requested()."""
+    layer_changed(key), radius_changed(m), erase_toggled(on), replace_toggled(on),
+    undo/redo_requested()."""
 
     mode_toggled = Signal(bool)
     tool_changed = Signal(str)
@@ -155,6 +156,7 @@ class BrushPanel(QWidget):
     layer_changed = Signal(str)
     radius_changed = Signal(float)
     erase_toggled = Signal(bool)
+    replace_toggled = Signal(bool)
     undo_requested = Signal()
     redo_requested = Signal()
 
@@ -199,12 +201,21 @@ class BrushPanel(QWidget):
         r_row.addWidget(self.sld, 1)
         r_row.addWidget(self.lbl_radius)
 
+        # Ластик и «Замена» — взаимоисключающие: ластик снимает флаг рисуемого слоя, а
+        # «Замена» ставит его И снимает все прочие ВКЛЮЧЁННЫЕ слои под мазком. Вместе
+        # они бессмысленны, поэтому включение одного гасит другой (см. _on_erase/_on_replace).
         self.sw_erase = Switch((244, 67, 54), self)
         self.sw_erase.setToolTip(tr("brush.erase_tip"))
-        self.sw_erase.toggled.connect(self.erase_toggled)
+        self.sw_erase.toggled.connect(self._on_erase)
+        self.sw_replace = Switch((255, 152, 0), self)
+        self.sw_replace.setToolTip(tr("brush.replace_tip"))
+        self.sw_replace.toggled.connect(self._on_replace)
         e_row = QHBoxLayout()
         e_row.addWidget(self.sw_erase)
-        e_row.addWidget(QLabel(tr("brush.erase")), 1)
+        e_row.addWidget(QLabel(tr("brush.erase")))
+        e_row.addSpacing(12)
+        e_row.addWidget(self.sw_replace)
+        e_row.addWidget(QLabel(tr("brush.replace")), 1)
 
         st = self.style()
         self.btn_undo = QPushButton(
@@ -270,6 +281,8 @@ class BrushPanel(QWidget):
     def clear(self):
         self.layer_list.clear()
         self.sw_mode.setChecked(False)
+        self.sw_erase.setChecked(False)
+        self.sw_replace.setChecked(False)
         self.set_history(0, 0)
         self.set_dirty(0)
 
@@ -305,6 +318,16 @@ class BrushPanel(QWidget):
             self.lbl_state.setText(tr("brush.dirty", n=f"{cells:,}".replace(",", " ")))
         else:
             self.lbl_state.setText(tr("brush.saved"))
+
+    def _on_erase(self, on: bool):
+        if on and self.sw_replace.isChecked():
+            self.sw_replace.setChecked(False)    # -> _on_replace(False)
+        self.erase_toggled.emit(on)
+
+    def _on_replace(self, on: bool):
+        if on and self.sw_erase.isChecked():
+            self.sw_erase.setChecked(False)      # -> _on_erase(False)
+        self.replace_toggled.emit(on)
 
     def _on_tool(self, b):
         """Клик по инструменту: выбрать его и сразу включить режим рисования."""

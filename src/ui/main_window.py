@@ -219,6 +219,7 @@ class MainWindow(QMainWindow):
         self.brush_panel.layer_changed.connect(self.on_brush_layer)
         self.brush_panel.radius_changed.connect(self.view.set_brush_radius)
         self.brush_panel.erase_toggled.connect(self.on_brush_erase)
+        self.brush_panel.replace_toggled.connect(self.on_brush_replace)
         self.brush_panel.undo_requested.connect(self.on_undo)
         self.brush_panel.redo_requested.connect(self.on_redo)
         self.view.erase_toggle_requested.connect(self._toggle_erase)   # Tab на карте
@@ -236,6 +237,7 @@ class MainWindow(QMainWindow):
         self._stroke: list = []                  # патчи текущего мазка
         self._last_paint = None                  # прошлая точка мазка (для отрезка)
         self._erase = False
+        self._replace = False                    # «Замена»: стирать прочие включённые слои
         self._dirty_cells = 0                    # ячеек разошлось с файлом на диске
 
         # панель проекта CE Tool: импорт TGA-слоёв (вода/суша, сравнение со слоями)
@@ -697,39 +699,64 @@ class MainWindow(QMainWindow):
     def on_brush_erase(self, on: bool):
         self._erase = on
 
+    def on_brush_replace(self, on: bool):
+        self._replace = on
+
+    def _replace_targets(self, key: str) -> list[str]:
+        """Слои, которые режим «Замена» стирает под мазком: все ВКЛЮЧЁННЫЕ, кроме
+        рисуемого. Выключенные не трогаем — пользователь сам решает тоглами, что
+        замещается. Вне режима «Замена» — пусто."""
+        if not self._replace:
+            return []
+        return [k for k in self.layers.visible_keys() if k != key]
+
     def on_stroke_started(self):
         self._last_paint = None                  # новый мазок — тянуть не от чего
 
     def on_paint(self, x: float, z: float):
         """Мазок кисти. Красим ОТРЕЗОК от прошлой точки к текущей: между событиями
         мыши курсор проскакивает десятки метров, и точками выходил пунктир.
-        Патчи копятся в _stroke — шагом истории станет весь мазок."""
+        Патчи копятся в _stroke — шагом истории станет весь мазок.
+        В режиме «Замена» тем же отрезком стираем прочие включённые слои — их патчи
+        идут в тот же шаг, поэтому undo откатывает замену целиком."""
         af, key = self.areaflags, self.brush_panel.layer_key()
         if not af or not key:
             return
         x0, z0 = self._last_paint or (x, z)      # начало мазка — просто круг
         self._last_paint = (x, z)
-        p = stroke(af, key, x0, z0, x, z, self.brush_panel.radius(), erase=self._erase)
-        if p is None:
-            return                               # вне карты или ничего не изменилось
-        self._stroke.append(p)
-        self._repaint_patch(key, p.col0, p.row0, p.before.shape)
+        radius = self.brush_panel.radius()
+        patches = [stroke(af, key, x0, z0, x, z, radius, erase=self._erase)]
+        patches += [stroke(af, other, x0, z0, x, z, radius, erase=True)
+                    for other in self._replace_targets(key)]
+        patches = [p for p in patches if p is not None]   # вне карты / уже так
+        if not patches:
+            return
+        self._stroke.extend(patches)
+        for p in patches:
+            self._repaint_patch(p.key, p.col0, p.row0, p.before.shape)
 
     def on_shape_committed(self, kind: str, points: list):
-        """Enter по контуру: заливка фигуры = один шаг истории, как мазок кисти."""
+        """Пробел по контуру: заливка фигуры = один шаг истории, как мазок кисти.
+        В режиме «Замена» той же фигурой стираем прочие включённые слои (см. on_paint)."""
         af, key = self.areaflags, self.brush_panel.layer_key()
         if not af or not key:
             return
-        if kind == "polygon":
-            p = fill_polygon(af, key, points, erase=self._erase)
-        else:
+
+        def apply(layer_key: str, erase: bool):
+            if kind == "polygon":
+                return fill_polygon(af, layer_key, points, erase=erase)
             (x0, z0), (x1, z1) = points[0], points[1]
             fn = fill_ellipse if kind == "ellipse" else fill_rect
-            p = fn(af, key, x0, z0, x1, z1, erase=self._erase)
-        if p is None:
-            return                               # вырожденный контур или всё уже так
-        self.history.push([p])
-        self._repaint_patch(key, p.col0, p.row0, p.before.shape)
+            return fn(af, layer_key, x0, z0, x1, z1, erase=erase)
+
+        patches = [apply(key, self._erase)]
+        patches += [apply(other, True) for other in self._replace_targets(key)]
+        patches = [p for p in patches if p is not None]   # вырожденный контур / уже так
+        if not patches:
+            return
+        self.history.push(patches)
+        for p in patches:
+            self._repaint_patch(p.key, p.col0, p.row0, p.before.shape)
         self._after_edit()
 
     def on_stroke_finished(self):

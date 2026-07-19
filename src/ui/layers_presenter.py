@@ -90,6 +90,11 @@ class LayersPresenter(QObject):
         row = next((r for r in self.panel._rows if r.key == key), None)
         return bool(row and row.btn.isChecked())
 
+    def visible_keys(self) -> list[str]:
+        """Ключи всех включённых сейчас слоёв — нужно кисти в режиме «Замена»
+        (что именно стереть под мазком)."""
+        return [r.key for r in self.panel._rows if r.btn.isChecked()]
+
     # ---------- видимость / построение ----------
 
     def _on_toggled(self, key: str, visible: bool) -> None:
