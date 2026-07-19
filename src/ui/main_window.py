@@ -75,12 +75,15 @@ class MainWindow(QMainWindow):
         i18n.load(self.settings.lang)            # ДО построения UI
         self.setWindowTitle(tr("app.title"))
         self.resize(1280, 860)
-        # панели можно стыковать рядом друг с другом (вложенные сплиты) и таскать группой
+        # панели можно стыковать рядом (вложенные сплиты) и во вкладки. БЕЗ GroupedDragging:
+        # он тащит целую вкладочную группу одним плавающим QDockWidgetGroupWindow — в связке
+        # с AllowNestedDocks это роняет Qt нативным abort'ом при драге группы (подтверждено
+        # диаг-логом: перед смертью несколько доков разом уходили во float). Одиночный
+        # драг/отцепление дока при этом работает как обычно.
         self.setDockOptions(
             QMainWindow.DockOption.AnimatedDocks
             | QMainWindow.DockOption.AllowNestedDocks
-            | QMainWindow.DockOption.AllowTabbedDocks
-            | QMainWindow.DockOption.GroupedDragging)
+            | QMainWindow.DockOption.AllowTabbedDocks)
         self.buildings = None
         self.types = None
         self.missions: list[Mission] = []
