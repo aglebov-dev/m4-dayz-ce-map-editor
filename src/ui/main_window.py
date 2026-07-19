@@ -8,7 +8,7 @@ from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QKeySequence
 from PySide6.QtWidgets import (
     QColorDialog, QComboBox, QDockWidget, QFileDialog, QFrame, QLabel, QMainWindow,
-    QMenu, QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QToolButton,
+    QMessageBox, QPushButton, QScrollArea, QSizePolicy, QToolBar, QToolButton,
     QWidget,
 )
 
@@ -21,7 +21,7 @@ from core import i18n
 from core.areaflags import read_areaflags
 from core.brush import History, plane_array, stroke
 from core.diff import DiffError, diff_maps, diff_planes
-from core.export import mask_rgba, summary_json, zones_csv
+from core.export import mask_rgba
 from core.groups import read_buildings
 from core.shapes import fill_ellipse, fill_polygon, fill_rect
 from core.i18n import tr
@@ -56,13 +56,13 @@ from ui.loot_panel import LootPanel
 from ui.map_view import MapView
 from ui.objects_panel import ObjectsInspectorPanel
 from ui.overlays import (
-    build_diff_pixmap, build_flag_pixmap, rgba_to_pixmap, tier_color, usage_color,
+    build_diff_pixmap, rgba_to_pixmap, tier_color, usage_color,
 )
 
 
 def _rgba_pixmap(rgba):
     return rgba_to_pixmap(rgba)
-from ui.stats_panel import SCOPE_MAP, SCOPE_REGION, StatsPanel
+from ui.stats_panel import StatsPanel
 from ui.zones_panel import ZonesPanel
 
 class MainWindow(QMainWindow):
@@ -105,28 +105,7 @@ class MainWindow(QMainWindow):
         self.btn_background.setEnabled(False)
         tb.addWidget(self.btn_background)
 
-        # инструменты карты живут здесь, а не в ряду панелей: тех уже девять, и ряд
-        # переполнялся — кнопки уезжали в скрытое меню «»»
-        tb.addSeparator()
-        self.btn_select = QToolButton()
-        self.btn_select.setText(tr("toolbar.select_region"))
-        self.btn_select.setToolTip(tr("toolbar.select_region_tip"))
-        self.btn_select.setCheckable(True)
-        self.btn_select.toggled.connect(self.on_select_mode)
-        tb.addWidget(self.btn_select)
-
-        self.btn_export = QToolButton()
-        self.btn_export.setText(tr("toolbar.export"))
-        self.btn_export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        menu = QMenu(self)
-        self.act_png = menu.addAction(tr("export.png"))
-        self.act_png.triggered.connect(self.export_png)
-        self.act_json = menu.addAction(tr("export.json"))
-        self.act_json.triggered.connect(self.export_json)
-        self.act_csv = menu.addAction(tr("export.csv"))
-        self.act_csv.triggered.connect(self.export_csv)
-        self.btn_export.setMenu(menu)
-        tb.addWidget(self.btn_export)
+        # выделение области переехало в панель «Статистика» (тогл-кнопка); экспорт удалён
 
         # язык — в конец первого ряда: во втором ряду теперь десять кнопок панелей,
         # и он переполнялся (кнопки уезжали в скрытое меню)
@@ -193,7 +172,6 @@ class MainWindow(QMainWindow):
             self, view=self.view, colors=self.colors, bus=self.bus,
             areaflags=lambda: getattr(self, "areaflags", None),
             is_layer_visible=self.layers.is_visible, wrap=self._dock_widget)
-        self.zones_panel = self.zones.panel          # алиас (export_csv: layer_key)
         self.dock_zones = self.zones.dock
 
         # === фича «Инспектор слоёв»: вся логика в ui/inspector_presenter.py ===
@@ -206,9 +184,8 @@ class MainWindow(QMainWindow):
 
         # панель статистики: площади флагов по карте / по выделенной области
         self.stats_panel = StatsPanel(self)
-        self.stats_panel.scope_changed.connect(self.on_stats_scope)
+        self.stats_panel.select_toggled.connect(self.on_select_toggled)  # тогл выделения области
         self.stats_panel.flag_clicked.connect(self.bus.layer_selected)  # клик по флагу = выбрать слой
-        self.stats_panel.clear_region_requested.connect(self.on_clear_region)
         self.dock_stats = QDockWidget(tr("dock.stats"), self)
         self.dock_stats.setObjectName("dock_stats")
         self.dock_stats.setWidget(self._dock_widget(self.stats_panel))
@@ -653,7 +630,7 @@ class MainWindow(QMainWindow):
         """Режим кисти. Слой, по которому рисуем, обязан быть виден — иначе правка
         уходила бы «в невидимое»."""
         if on:
-            self.btn_select.setChecked(False)    # два инструмента на ЛКМ разом — нельзя
+            self.stats_panel.select_switch.setChecked(False)   # два инструмента на ЛКМ — нельзя
         self.view.set_brush_mode(on)
         if on:
             self.view.set_brush_radius(self.brush_panel.radius())
@@ -815,72 +792,6 @@ class MainWindow(QMainWindow):
         self.zones.invalidate()                  # зоны считались по старым данным
         self.refresh_stats()
 
-    # ---------- экспорт ----------
-
-    def _visible_flag_layers(self) -> list[str]:
-        """Ключи ВКЛЮЧЁННЫХ слоёв тиров/usage — что видно, то и экспортируем."""
-        af = self.areaflags
-        if not af:
-            return []
-        keys = ([f"tier:{n}" for n in af.values] + [f"usage:{n}" for n in af.usages])
-        return [k for k in keys if self.layers_panel.row(k).btn.isChecked()]
-
-    def export_png(self):
-        """По PNG на каждый включённый слой: сетка карты 1:1, прозрачно вне флага."""
-        af = self.areaflags
-        keys = self._visible_flag_layers()
-        if not af or not keys:
-            QMessageBox.information(self, tr("export.title"), tr("export.no_layers"))
-            return
-        folder = QFileDialog.getExistingDirectory(self, tr("dlg.export_png_dir"))
-        if not folder:
-            return
-        m = self.current_mission()
-        prefix = m.name if m else "map"
-        done = []
-        for key in keys:
-            name = key.split(":", 1)[1]
-            pm = build_flag_pixmap(af, name, self.layer_color(key))
-            p = os.path.join(folder, f"{prefix}_{key.replace(':', '_')}.png")
-            if pm.save(p, "PNG"):
-                done.append(p)
-        self.statusBar().showMessage(tr("export.png_done", n=len(done),
-                                        folder=folder), 8000)
-
-    def export_json(self):
-        """Сводка: та же, что в панели «Статистика» (охват учитывается)."""
-        af = self.areaflags
-        if not af:
-            return
-        m = self.current_mission()
-        p, _ = QFileDialog.getSaveFileName(
-            self, tr("dlg.export_json"), f"{m.name if m else 'map'}_summary.json",
-            tr("dlg.json_filter"))
-        if not p:
-            return
-        txt = summary_json(af, self.region_cells(), self.buildings,
-                           source=m.path if m else "")
-        with open(p, "w", encoding="utf-8") as f:
-            f.write(txt)
-        self.statusBar().showMessage(tr("export.json_done", file=p), 8000)
-
-    def export_csv(self):
-        """CSV зон слоя, выбранного в панели «Зоны» (он же — источник подписей)."""
-        af, key = self.areaflags, self.zones_panel.layer_key
-        if not af or not key:
-            QMessageBox.information(self, tr("export.title"), tr("export.no_zones"))
-            return
-        m = self.current_mission()
-        base = f"{m.name if m else 'map'}_{key.replace(':', '_')}_zones.csv"
-        p, _ = QFileDialog.getSaveFileName(self, tr("dlg.export_csv"), base,
-                                           tr("dlg.csv_filter"))
-        if not p:
-            return
-        zones = self.zones.cached(key)
-        with open(p, "w", encoding="utf-8", newline="") as f:
-            f.write(zones_csv(zones, af.cell_size, key))
-        self.statusBar().showMessage(tr("export.csv_done", n=len(zones), file=p), 8000)
-
     # ---------- проект CE Tool (импорт TGA-слоёв) ----------
 
     def choose_ce_project(self):
@@ -1016,48 +927,36 @@ class MainWindow(QMainWindow):
 
     # ---------- статистика и выделение области ----------
 
-    def on_select_mode(self, on: bool):
-        """Кнопка «Выделение»: ЛКМ тянет рамку вместо пана (пан остаётся на ПКМ).
-        Кнопка и охват в панели — одно состояние: выключили кнопку → охват «вся карта»."""
+    def on_select_toggled(self, on: bool):
+        """Тогл «Выделение области» в панели «Статистика»: ЛКМ тянет рамку вместо пана (пан
+        остаётся на ПКМ). Выключение убирает выделение с карты и возвращает охват к всей карте."""
         if on:
             self.brush_panel.sw_mode.setChecked(False)   # ЛКМ занимает кто-то один
         self.view.set_select_mode(on)            # строго ПОСЛЕ выключения кисти
-        if on:
-            self.dock_stats.show()
-            self.dock_stats.raise_()
-        elif self.stats_panel.cmb_scope.currentIndex() == SCOPE_REGION:
-            self.stats_panel.cmb_scope.setCurrentIndex(SCOPE_MAP)   # сам позовёт refresh
+        if not on:
+            self.view.clear_region()             # селектор пропадает с карты
+        self.refresh_stats(now=True)
+        self.refresh_region_loot()
 
     def on_region_selected(self, x0: float, z0: float, x1: float, z1: float):
-        self.stats_panel.set_region_available(True)
-        self.stats_panel.cmb_scope.setCurrentIndex(SCOPE_REGION)
-        self.refresh_stats(now=True)             # scope мог и не смениться
+        """Нарисовали рамку (тогл включён) — статистика/лут считаются по выделению."""
+        self.refresh_stats(now=True)
         self.refresh_region_loot()
 
     def on_clear_region(self):
-        """Выделение снято (кнопкой «Снять» или кликом по карте). Режим рамки при этом
-        НЕ выключаем: пользователь снял прямоугольник, а не вышел из инструмента."""
+        """Выделение снято кликом по карте. Режим рамки НЕ выключаем (тогл остаётся включён):
+        пользователь снял прямоугольник, а не вышел из инструмента — охват вернётся к карте."""
         self.view.clear_region()
-        cmb = self.stats_panel.cmb_scope
-        cmb.blockSignals(True)                   # иначе возврат охвата снял бы и режим
-        self.stats_panel.set_region_available(False)
-        cmb.blockSignals(False)
         self.refresh_stats(now=True)
         if self.buildings is not None:
             self.loot_panel.clear()
 
-    def on_stats_scope(self, index: int):
-        """Охват в панели — тот же переключатель, что кнопка «Выделение» в тулбаре."""
-        self.btn_select.setChecked(index == SCOPE_REGION)
-        self.refresh_stats(now=True)             # пользователь переключил — ждёт ответ
-        self.refresh_region_loot()
-
     def region_cells(self):
-        """Ячейки выделения (col0, row0, col1, row1) или None — если охват «вся карта»."""
+        """Ячейки выделения (col0, row0, col1, row1) или None — если тогл выключен / нет рамки."""
         af, world = self.areaflags, self.view.region()
         if not af or world is None:
             return None
-        if self.stats_panel.cmb_scope.currentIndex() != SCOPE_REGION:
+        if not self.stats_panel.select_switch.isChecked():
             return None
         return region_from_world(af, *world)
 

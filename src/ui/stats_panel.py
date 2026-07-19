@@ -5,36 +5,34 @@ from __future__ import annotations
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
-    QComboBox, QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget,
-    QTableWidgetItem, QVBoxLayout, QWidget,
+    QHBoxLayout, QHeaderView, QLabel, QTableWidget, QTableWidgetItem, QVBoxLayout,
+    QWidget,
 )
 
 from core.i18n import tr
 from core.stats import MapStats
-
-SCOPE_MAP, SCOPE_REGION = 0, 1
+from ui.layers_panel import Switch
 
 
 class StatsPanel(QWidget):
-    """Сигналы: scope_changed(index) — вся карта / выделение;
-    flag_clicked(key) — строка флага; clear_region_requested()."""
+    """Сигналы: select_toggled(on) — включён режим выделения области (ЛКМ тянет рамку);
+    flag_clicked(key) — строка флага. Статистика: по всей карте, а при активном выделении —
+    по нему."""
 
-    scope_changed = Signal(int)
+    select_toggled = Signal(bool)
     flag_clicked = Signal(str)
-    clear_region_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.cmb_scope = QComboBox()
-        self.cmb_scope.addItems([tr("stats.scope_map"), tr("stats.scope_region")])
-        self.cmb_scope.currentIndexChanged.connect(self.scope_changed)
-        self.btn_clear = QPushButton(tr("stats.clear_region"))
-        self.btn_clear.clicked.connect(self.clear_region_requested)
-        self.btn_clear.setEnabled(False)
+        # тогл-кнопка как на слоях: включает режим выделения области карты
+        self.select_switch = Switch((80, 150, 240))
+        self.select_switch.setToolTip(tr("toolbar.select_region_tip"))
+        self.select_switch.toggled.connect(self.select_toggled)
 
         top = QHBoxLayout()
-        top.addWidget(self.cmb_scope, 1)
-        top.addWidget(self.btn_clear)
+        top.addWidget(self.select_switch)
+        top.addWidget(QLabel(tr("toolbar.select_region")))
+        top.addStretch(1)
 
         self.lbl = QLabel(tr("stats.hint"))
         self.lbl.setWordWrap(True)
@@ -61,16 +59,16 @@ class StatsPanel(QWidget):
         lay.addWidget(self.lbl)
         lay.addWidget(self.tbl, 1)
 
-    def set_region_available(self, b: bool):
-        """Есть ли выделение: без него режим «Выделение» недоступен."""
-        self.btn_clear.setEnabled(b)
-        if not b and self.cmb_scope.currentIndex() == SCOPE_REGION:
-            self.cmb_scope.setCurrentIndex(SCOPE_MAP)
+    def set_select(self, on: bool):
+        """Синхронизировать тогл без эмита сигнала (напр. когда выделение снял другой инструмент)."""
+        self.select_switch.blockSignals(True)
+        self.select_switch.setChecked(on)
+        self.select_switch.blockSignals(False)
 
     def clear(self):
         self.lbl.setText(tr("stats.hint"))
         self.tbl.setRowCount(0)
-        self.btn_clear.setEnabled(False)
+        self.set_select(False)
 
     def show_stats(self, st: MapStats, colors: dict[str, tuple[int, int, int]],
                    region_world=None):
