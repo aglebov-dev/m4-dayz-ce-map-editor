@@ -952,7 +952,10 @@ class MainWindow(QMainWindow):
         if p:
             self.load_diff(p)
 
-    def load_diff(self, path: str, raise_dock: bool = True):
+    def load_diff(self, path: str, raise_dock: bool = True, source: str = ""):
+        """source — как назвать второй срез в шапке панели. Пусто = имя папки файла.
+        Снапшот передаёт СВОЮ подпись: иначе в шапке стояло безликое «snapshot», и было
+        не отличить сравнение со снапшотом от сравнения с загруженной картой."""
         self.on_diff_clear()
         folder = os.path.dirname(path)
         if not os.path.isfile(os.path.join(folder, "cfglimitsdefinition.xml")):
@@ -971,7 +974,7 @@ class MainWindow(QMainWindow):
             self.diff_other = None
             self.diff_panel.show_error(tr("diff.error", err=e))
             return
-        self.diff_panel.show_diff(d, os.path.basename(folder) or folder)
+        self.diff_panel.show_diff(d, source or os.path.basename(folder) or folder)
         if raise_dock:                           # авто-дифф при загрузке дока не поднимает
             self.dock_diff.show()
             self.dock_diff.raise_()

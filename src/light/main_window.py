@@ -303,7 +303,8 @@ class LightMainWindow(MainWindow):
         if not snapshot_dir:
             self.diff_panel.show_error("Снапшот пуст")
             return
-        self.load_diff(os.path.join(snapshot_dir, "areaflags.map"), raise_dock=raise_dock)
+        self.load_diff(os.path.join(snapshot_dir, "areaflags.map"), raise_dock=raise_dock,
+                       source=tr("diff.src_snapshot"))
 
     def reload_project(self):
         """Перечитать локальные файлы проекта (последнее сохранение на диске); сбрасывает
