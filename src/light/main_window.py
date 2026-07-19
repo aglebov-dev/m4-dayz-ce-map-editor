@@ -399,8 +399,9 @@ class LightMainWindow(MainWindow):
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
         self.layers.populate(af, tiers_on=False)     # презентер сам считает counts и цвета
-        self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
-                                  + [(f"usage:{n}", n) for n in af.usages])
+        self.brush_panel.populate(
+            [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
 
     def apply_gating(self):
         """Блокировать инструменты, чьих файлов нет; подсказать, каких именно."""

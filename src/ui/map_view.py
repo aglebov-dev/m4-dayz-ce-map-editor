@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QImage, QPainter, QPalette, QPen, QPixmap,
 )
@@ -42,6 +42,7 @@ class MapView(QGraphicsView):
     stroke_finished = Signal()              # ЛКМ отпущена — мазок закончен
     shape_committed = Signal(str, list)     # (kind, точки в мировых метрах) — залить
     shape_state = Signal(bool)              # есть ли контур, который можно применить
+    erase_toggle_requested = Signal()       # Tab в режиме кисти — переключить кисть/ластик
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -386,8 +387,17 @@ class MapView(QGraphicsView):
         self.scene().addItem(self._shape)
         return self._shape
 
+    def event(self, ev):
+        # Tab перехватываем в event(): иначе фокус-фреймворк уводит его на другой виджет
+        # до keyPressEvent. В режиме кисти Tab (и Shift+Tab) — переключить кисть/ластик.
+        if (ev.type() == QEvent.Type.KeyPress and self._brush_mode
+                and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
+            self.erase_toggle_requested.emit()
+            return True
+        return super().event(ev)
+
     def keyPressEvent(self, ev):
-        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        if ev.key() == Qt.Key.Key_Space:         # Пробел — залить контур (вместо Enter)
             self.commit_shape()
             return
         if ev.key() == Qt.Key.Key_Escape:

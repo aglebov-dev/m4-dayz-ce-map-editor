@@ -194,8 +194,8 @@ class MainWindow(QMainWindow):
         self._stats_dirty = False
 
         # === Шина слоёв (AppBus): что осталось на MainWindow ===
-        # авто-показ -> layers_presenter; показ и цвет зон -> zones_presenter; тут — только кисть
-        self.bus.layer_selected.connect(self.on_layer_selected)   # выбор -> слой рисования кисти (ниже)
+        # авто-показ -> layers_presenter; показ и цвет зон -> zones_presenter.
+        # Слой рисования кисти выбирается СВОИМ списком в панели «Кисть» (не из «Слоёв»).
         self._stats_timer = QTimer(self)
         self._stats_timer.setSingleShot(True)
         self._stats_timer.setInterval(250)
@@ -217,7 +217,8 @@ class MainWindow(QMainWindow):
         self.brush_panel.erase_toggled.connect(self.on_brush_erase)
         self.brush_panel.undo_requested.connect(self.on_undo)
         self.brush_panel.redo_requested.connect(self.on_redo)
-        self.brush_panel.save_requested.connect(self.on_save)
+        self.view.erase_toggle_requested.connect(self._toggle_erase)   # Tab на карте
+        self.bus.layer_color_changed.connect(self.brush_panel.set_layer_color)   # цвет свотча
         self.dock_brush = QDockWidget(tr("dock.brush"), self)
         self.dock_brush.setObjectName("dock_brush")
         self.dock_brush.setWidget(self._dock_widget(self.brush_panel))
@@ -602,8 +603,9 @@ class MainWindow(QMainWindow):
         self.layers.populate(af)                 # презентер сам считает counts и цвета
         self.buildings_feature.populate(af, model, self.building_index)   # слои + инспектор
         self._load_territories(m)
-        self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
-                                  + [(f"usage:{n}", n) for n in af.usages])
+        self.brush_panel.populate(
+            [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
         self.refresh_stats(now=True)             # карта загружена — сводка по всей карте
         if af.repaired_crlf:
             self.lbl_af.setText(tr("af.repaired", n=af.repaired_crlf))
@@ -640,14 +642,6 @@ class MainWindow(QMainWindow):
             self.buildings_feature.show_building_at(x, z, af, colors, visible)
 
 
-    def on_layer_selected(self, key: str):
-        """Выбор слоя (клик по строке / флагу в статистике): в режиме кисти делаем слой
-        рисуемым. Авто-показ слоя — в layers_presenter, показ зон — в zones_presenter."""
-        if not self.areaflags or key.startswith("obj:"):
-            return
-        if self.view._brush_mode:
-            self.brush_panel.select_layer(key)   # -> on_brush_layer -> подсветка
-
     # ---------- кисть (правки живут в памяти; запись файла — этап 12) ----------
 
     def on_brush_mode(self, on: bool):
@@ -663,18 +657,19 @@ class MainWindow(QMainWindow):
                 self.on_brush_layer(key)
             self.dock_brush.show()
             self.dock_brush.raise_()
-        else:
-            self.layers_panel.set_active(None)   # вне режима кисти подсветка сбивает
 
     def on_brush_layer(self, key: str):
-        """Активный слой кисти: включаем его показ, строим пиксмап и подсвечиваем строку
-        в панели «Слои» — иначе не видно, по чему рисуешь."""
+        """Активный слой кисти (выбран в списке панели «Кисть»): временно показываем его
+        и строим пиксмап — иначе не видно, по чему рисуешь. Подсветку строки держит сам
+        список кисти."""
         if not self.areaflags or not key:
             return
         self.layers.auto_show(key)               # покажет слой (временно) и погасит прошлый
         self.layers.ensure_built(key)
-        if self.view._brush_mode:
-            self.layers_panel.set_active(key)
+
+    def _toggle_erase(self):
+        """Tab на карте в режиме кисти — переключить кисть/ластик (по кругу)."""
+        self.brush_panel.sw_erase.setChecked(not self.brush_panel.sw_erase.isChecked())
 
     def on_brush_erase(self, on: bool):
         self._erase = on
