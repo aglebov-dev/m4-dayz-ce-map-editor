@@ -66,17 +66,19 @@ macos.permissions =
 
 # mode of using nuitka. accepts standalone or onefile. default = onefile
 # onefile = one .exe (unpacks to a temp dir on launch). For onedir (faster start, assets
-# sit next to the exe as loose files) set: mode = standalone
+# sit next to the exe as loose files) set = mode = standalone
 mode = onefile
 
 # specify any extra nuitka arguments
-#  Bundle ONLY the translations (i18n). Everything else the app builds into appdata itself:
+#  bundle only the translations (i18n). everything else the app builds into appdata itself = 
 #  the user unpacks satellite tiles and generates building footprints from the game files
-#  (Background panel -> Unpack), landing in %LOCALAPPDATA%/M4DayZCEMapEditor/{tiles,buildings}.
-#  So assets/tiles and assets/buildings are NOT bundled.
-#  --include-package=paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
-#     If the build fails on the 'cryptography' dependency, drop this arg (SFTP off, rest works).
-# NOTE: keep this file ASCII-only — pyside6-deploy reads the spec as cp1252, not utf-8.
+#  (background panel -> unpack). data is PORTABLE: it lands in an "appdata" folder next to
+#  the exe (<exe_dir>/appdata/{tiles,buildings,projects,...}); if that location is read-only
+#  (e.g. Program Files) it falls back to %localappdata%/m4dayzcemapeditor. see core/paths.py.
+#  so assets/tiles and assets/buildings are not bundled.
+#  --include-package = paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
+#     if the build fails on the 'cryptography' dependency, drop this arg (sftp off, rest works).
+# note = keep this file ASCII-only -- pyside6-deploy reads the spec as cp1252, not utf-8.
 extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/i18n=assets/i18n --include-package=paramiko
 
 [buildozer]
