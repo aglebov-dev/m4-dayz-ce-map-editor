@@ -263,9 +263,10 @@ class BuildingsLayersPanel(LayersPanel):
         self.layout().insertWidget(0, self._mode_row())   # переключатель — над списком слоёв
 
     def _init_sliders(self):
-        self.sld_points = self._make_slider("objpoints:", 100,
+        # дефолты: точки 50%, заливка контура 50%, обводка 100% (чёткая рамка)
+        self.sld_points = self._make_slider("objpoints:", 50,
                                             tr("layers.bld_points_opacity_tip"))
-        self.sld_obj = self._make_slider("obj:", 100, tr("layers.bld_opacity_tip"))
+        self.sld_obj = self._make_slider("obj:", 50, tr("layers.bld_opacity_tip"))
         self.sld_border = self._make_slider("objborder:", 100,
                                             tr("layers.bld_border_opacity_tip"))
 
