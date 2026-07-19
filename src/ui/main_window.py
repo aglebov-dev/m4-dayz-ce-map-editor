@@ -309,9 +309,8 @@ class MainWindow(QMainWindow):
             self.addAction(act)
 
         self._restore_ui_state()
-
-        if self.settings.workdir and os.path.isdir(self.settings.workdir):
-            self.load_workdir(self.settings.workdir)
+        # Прошлый проект при старте НЕ загружаем — загрузку ведёт приветственное окно
+        # (иначе битый/устаревший workdir сразу даёт ошибку).
 
     def _dock_widget(self, panel: QWidget) -> QWidget:
         """Содержимое дока — в область прокрутки: иначе минимальную ширину панели
@@ -469,7 +468,7 @@ class MainWindow(QMainWindow):
         if d:
             self.load_workdir(d)
 
-    def load_workdir(self, d: str, mission_name: str = ""):
+    def load_workdir(self, d: str, mission_name: str = "", silent: bool = False):
         d = os.fspath(d)                         # принимаем Path (project.workdir) и str
         self.missions = scan_workdir(d, mission_name)   # имя миссии из config (плоская раскладка)
         self.settings.workdir = d
@@ -483,7 +482,8 @@ class MainWindow(QMainWindow):
                 tr("mission.title", name=m.name, world=m.world, size=m.world_size), m)
         self.cmb_mission.blockSignals(False)
         if not self.missions:
-            QMessageBox.warning(self, tr("dlg.no_missions_title"), tr("dlg.no_missions_text"))
+            if not silent:                       # тихий режим: сообщение покажет вызывающий
+                QMessageBox.warning(self, tr("dlg.no_missions_title"), tr("dlg.no_missions_text"))
             return
         idx = 0
         for i, m in enumerate(self.missions):

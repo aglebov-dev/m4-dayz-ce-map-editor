@@ -21,14 +21,16 @@ def main():
         app.setWindowIcon(QIcon(icon_path))
 
     win = LightMainWindow()
-    # при старте — приветственное окно: выбор способа загрузки проекта вкладками
-    welcome = WelcomeWindow(win)
-    if welcome.exec() and welcome.result_project:
-        win.open_project(welcome.result_project)
-        win.show()
-        sys.exit(app.exec())
-    else:
-        sys.exit()
+    # при старте — приветственное окно: выбор способа загрузки. Если проект не открылся
+    # (нет карты / файл повреждён) — остаёмся на диалоге, редактор не показываем.
+    while True:
+        welcome = WelcomeWindow(win)
+        if not (welcome.exec() and welcome.result_project):
+            sys.exit()
+        if win.open_project(welcome.result_project):
+            break
+    win.show()
+    sys.exit(app.exec())
 
 if __name__ == "__main__":
     main()

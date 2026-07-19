@@ -14,7 +14,7 @@ from light.sources.base import Availability, ProjectSource
 
 class RecentProjectSource(ProjectSource):
     id = "recent"
-    title = "Недавние"
+    title = "Проекты"
 
     def availability(self) -> Availability:
         """Доступен, только если есть хотя бы один сохранённый проект — иначе показывать
@@ -27,7 +27,7 @@ class RecentProjectSource(ProjectSource):
         widget = QWidget()
         layout = QVBoxLayout(widget)
 
-        layout.addWidget(QLabel("Ранее загруженные проекты:"))
+        layout.addWidget(QLabel("Мои карты:"))
 
         self.list_widget = QListWidget()
         for config in P.list_projects():

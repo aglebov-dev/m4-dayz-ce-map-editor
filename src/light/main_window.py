@@ -186,16 +186,25 @@ class LightMainWindow(MainWindow):
         if dlg.exec() and dlg.result_project:
             self.open_project(dlg.result_project)
 
-    def open_project(self, proj: P.Project):
+    def open_project(self, proj: P.Project) -> bool:
+        """Открыть проект. True — карта загружена; False — карты нет / файл повреждён
+        (редактор показывать не нужно, сообщение уже показано)."""
         self.project = proj
-        # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/)
-        self.load_workdir(proj.workdir, proj.mission_name)
+        # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/).
+        # silent: своё понятное сообщение покажем ниже, без «миссии не найдены».
+        self.load_workdir(proj.workdir, proj.mission_name, silent=True)
+        if self.areaflags is None:
+            QMessageBox.warning(
+                self, "Загрузка проекта",
+                f"Не удалось открыть «{proj.name}»: карта не найдена или файл повреждён.")
+            self.project = None
+            return False
         self.apply_gating()
         self.button_bi_export.setEnabled(True)
         self.button_reload.setEnabled(True)
-        has_map = self.areaflags is not None
-        self.button_save.setEnabled(has_map)
+        self.button_save.setEnabled(True)        # карта загружена
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
+        return True
 
     def reload_project(self):
         """Перечитать файлы проекта из источника (потеряет несохранённые правки)."""

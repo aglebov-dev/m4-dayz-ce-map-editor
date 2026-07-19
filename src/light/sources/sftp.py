@@ -15,7 +15,7 @@ from light.sources.base import Availability, ProjectSource
 
 class SftpProjectSource(ProjectSource):
     id = "sftp"
-    title = "Через SFTP"
+    title = "Импорт через SFTP"
 
     def availability(self) -> Availability:
         if sftp_available():

@@ -16,7 +16,7 @@ from light.sources.base import ProjectSource
 
 class FolderProjectSource(ProjectSource):
     id = "folder"
-    title = "Из файловой системы"
+    title = "Импорт из файловой системы"
 
     def build_widget(self) -> QWidget:
         widget = QWidget()
