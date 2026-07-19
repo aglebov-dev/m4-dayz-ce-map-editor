@@ -10,6 +10,12 @@ if (-not (Test-Path $deploy)) {
     Write-Error "pyside6-deploy not found at $deploy. Create the env first: rebuild-env.bat"
     exit 1
 }
+# pyside6-deploy copies the built exe into exec_directory but does NOT create it.
+# Make sure dist\ exists, else finalize() fails with FileNotFoundError on the copy.
+$dist = Join-Path $root "dist"
+if (-not (Test-Path $dist)) {
+    New-Item -ItemType Directory -Path $dist | Out-Null
+}
 # pyside6-deploy expects input_file (app.py) and the .spec in the current dir -> run from src\
 Push-Location (Join-Path $root "src")
 try {
