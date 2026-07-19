@@ -7,6 +7,7 @@ import os
 
 import numpy as np
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButton
+from PySide6.QtGui import QIcon
 
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
@@ -34,9 +35,10 @@ class LightMainWindow(MainWindow):
         self.project: P.Project | None = None
         self.setWindowTitle("m4 dayz ce map editor")
 
-        # Иконка окна рисуется кодом (light/app_icon), не грузится с диска
-        from light.app_icon import make_app_icon
-        self.setWindowIcon(make_app_icon())
+        # Иконка окна — из app_icon_high.ico
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "app_icon_high.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self.setMinimumSize(640, 400)            # лёгкое окно свободно сжимается
         self._add_project_buttons()

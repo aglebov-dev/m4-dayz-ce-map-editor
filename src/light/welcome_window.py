@@ -7,12 +7,14 @@
 Вкладки собраны в карточку по центру окна («со смещением в центр»)."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import os
+
+from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QDialog, QHBoxLayout, QLabel, QSizePolicy, QTabWidget, QVBoxLayout, QWidget,
 )
 
-from light.app_icon import make_app_icon
 from light.sources import SOURCES
 from light.sources.base import Availability, ProjectSource
 
@@ -63,15 +65,26 @@ class WelcomeWindow(QDialog):
         layout = QHBoxLayout(header)
         layout.setContentsMargins(0, 0, 0, 8)
 
-        logo = QLabel()
-        logo.setPixmap(make_app_icon().pixmap(48, 48))   # иконка рисуется кодом
-        layout.addWidget(logo)
+        icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "app_icon_high.ico")
+        if os.path.exists(icon_path):
+            logo = QLabel()
+            logo.setPixmap(self._sharp_icon(icon_path, 48))
+            layout.addWidget(logo)
 
         title = QLabel("<b style='font-size:16pt'>M4 DayZ CE Map Editor</b><br>"
                        "<span style='color:gray'>Загрузка проекта</span>")
         layout.addWidget(title)
         layout.addStretch(1)
         return header
+
+    def _sharp_icon(self, path: str, logical_size: int):
+        """Чёткий логотип из .ico: берём кадр под физический размер (logical×DPI) — Qt
+        выбирает ближайший встроенный размер и уменьшает, а не растягивает мелкий."""
+        ratio = max(1.0, self.devicePixelRatioF())
+        pixmap = QIcon(path).pixmap(QSize(round(logical_size * ratio),
+                                          round(logical_size * ratio)))
+        pixmap.setDevicePixelRatio(ratio)     # рисуется в logical_size логических px, резко
+        return pixmap
 
     # ---------- политика отображения источников ----------
 
