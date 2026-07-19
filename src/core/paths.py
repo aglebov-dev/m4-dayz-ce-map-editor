@@ -14,6 +14,12 @@ import sys
 from pathlib import Path
 
 
+def _is_compiled() -> bool:
+    """Собрано ли приложение: Nuitka/pyside6-deploy (`__compiled__` в globals модуля) или
+    PyInstaller (`sys.frozen`). В обычном запуске из исходников — False."""
+    return getattr(sys, "frozen", False) or "__compiled__" in globals()
+
+
 class AppPaths:
     """Раскладка файлов приложения. По умолчанию корень определяется автоматически;
     `appdata` можно переопределить (тесты) — иначе берётся env `M4_HOME` или `<root>/appdata`."""
@@ -25,10 +31,15 @@ class AppPaths:
 
     @staticmethod
     def _detect_root() -> Path:
-        """Корень приложения. Заморожено (exe) — папка рядом с exe; иначе — корень репы
-        (этот файл: `src/core/paths.py` → на три уровня вверх)."""
+        """Корень с ассетами. PyInstaller (`sys.frozen`) — папка рядом с exe. Nuitka/
+        pyside6-deploy (`__compiled__`) — корень бандла: там модули лежат в корне, значит
+        `core/paths.*` → на два уровня вверх (в onefile это распакованная временная папка,
+        куда попадают и данные из `--include-data-dir`). Иначе dev — корень репы (`src/core/
+        paths.py` → на три уровня вверх)."""
         if getattr(sys, "frozen", False):
             return Path(sys.executable).parent
+        if "__compiled__" in globals():
+            return Path(__file__).resolve().parent.parent
         return Path(__file__).resolve().parents[2]
 
     # ---- ассеты: только чтение, поставляются с приложением ----
@@ -56,12 +67,18 @@ class AppPaths:
     @property
     def appdata(self) -> Path:
         """Куда приложение ПИШЕТ: проекты, снапшоты, кэш подложек, настройки.
-        Переопределяется env `M4_HOME` (тесты / вынос данных).
-        TODO: убрать env — передавать путь явно (см. docs/PLAN.md)."""
+        Переопределяется env `M4_HOME` (тесты / вынос данных). В собранном приложении —
+        `%LOCALAPPDATA%/M4DayZCEMapEditor` (рядом с exe писать нельзя: onefile живёт во
+        временной папке, а установка может быть read-only). В dev — `<root>/appdata`."""
         if self._appdata is not None:
             return self._appdata
         env = os.environ.get("M4_HOME")
-        return Path(env) if env else self.root / "appdata"
+        if env:
+            return Path(env)
+        if _is_compiled():
+            base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+            return Path(base) / "M4DayZCEMapEditor"
+        return self.root / "appdata"
 
     @property
     def projects(self) -> Path:

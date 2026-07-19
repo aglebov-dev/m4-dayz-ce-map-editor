@@ -10,7 +10,7 @@ project_dir = .
 input_file = app.py
 
 # directory where the executable output is generated
-exec_directory = D:\dayz-repositories\M4.DayZ.CE.Map.Editor\src
+exec_directory = D:\dayz-repositories\M4.DayZ.CE.Map.Editor\dist
 
 # path to the project file relative to project_dir
 project_file = 
@@ -65,10 +65,17 @@ plugins =
 macos.permissions = 
 
 # mode of using nuitka. accepts standalone or onefile. default = onefile
+# onefile — один .exe (распаковывается во временную папку при запуске). Для onedir-сборки
+# (быстрее старт, ассеты рядом лежат файлами) поставь standalone.
 mode = onefile
 
 # specify any extra nuitka arguments
-extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads
+#  --include-data-dir=SRC=DEST — кладём ассеты в бандл (читаются через core.paths):
+#     i18n (тексты интерфейса) и buildings (footprint-датасет) — маленькие и обязательные.
+#     Тайлы подложки (assets/tiles ~108 МБ) НЕ бандлим: пользователь распаковывает их из
+#     игры в %LOCALAPPDATA%/M4DayZCEMapEditor/tiles (или кладёт туда готовую пирамиду).
+#  --include-package=paramiko — чтобы работала загрузка через SFTP (иначе вкладка отключена).
+extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/i18n=assets/i18n --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/buildings=assets/buildings --include-package=paramiko
 
 [buildozer]
 

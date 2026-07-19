@@ -18,6 +18,14 @@ settings.json
 # служебные данные приложения (подложки, конфиги проектов, снапшоты)
 appdata/
 
+# сборка (pyside6-deploy / Nuitka)
+/dist/
+/src/deployment/
+/src/*.build/
+/src/*.dist/
+/src/*.onefile-build/
+/src/app.exe
+
 # датасеты зданий (извлечены из ассетов BI; см. EULA перед публикацией) — bundled-ассет,
 # как тайлы: поставляется отдельно, в git не держим
 /assets/buildings/
