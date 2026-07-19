@@ -28,7 +28,6 @@ from core.i18n import tr
 from core.tiles import find_tiles
 from core.types import instances_for_item, items_for_building, read_types
 
-ITEM_LAYER_COLOR = (255, 64, 200)    # слой «где может лежать предмет» (обратный матчинг)
 from core.stats import (
     buildings_in_region, items_for_region, map_stats, region_from_world,
 )
@@ -49,6 +48,7 @@ from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
 from ui.objects_presenter import ObjectsPresenter
+from ui.items_presenter import ItemsPresenter
 from common.buildings import BuildingsModel
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
@@ -174,9 +174,7 @@ class MainWindow(QMainWindow):
         self.objects = ObjectsPresenter(
             self, view=self.view, colors=self.colors, settings=self.settings,
             mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
-        self.objects_layers = self.objects.obj_layers    # алиасы (on_items_selection/stats/light)
-        self.objects_panel = self.objects.inspector_panel
-        self.loot_panel = self.objects.loot_panel
+        self.loot_panel = self.objects.loot_panel        # алиас: нужен для лута по области
         self.dock_obj_layers = self.objects.dock_layers
         self.dock_objects = self.objects.dock_inspector
         self.dock_loot = self.objects.dock_loot
@@ -279,11 +277,11 @@ class MainWindow(QMainWindow):
         self._diff_key = None                    # какой флаг сейчас на карте
 
         # панель Items: весь справочник типов, мультивыбор -> здания на карте
-        self.items_panel = ItemsPanel(self)
-        self.items_panel.selection_changed.connect(self.on_items_selection)
-        self.dock_items = QDockWidget(tr("dock.items"), self)
-        self.dock_items.setObjectName("dock_items")
-        self.dock_items.setWidget(self._dock_widget(self.items_panel))
+        # === фича «Предметы» (обратный матчинг): ui/items_presenter.py ===
+        self.items = ItemsPresenter(
+            self, view=self.view, buildings=lambda: self.buildings_model,
+            building_opacity=self.objects.opacity, wrap=self._dock_widget)
+        self.dock_items = self.items.dock
 
         self._default_dock_layout()
 
@@ -558,7 +556,7 @@ class MainWindow(QMainWindow):
         self.view.clear_territories()
         self.territories_panel.clear()
         self._terr_colors.clear()
-        self.items_panel.clear()
+        self.items.clear()
         self.view.clear_overlays()
         self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
         self.objects.clear()                     # obj-слои + инспектор объектов + спавн
@@ -600,7 +598,7 @@ class MainWindow(QMainWindow):
         self.bld_eff_v = model.eff_v if model else None
         self.types = model.types if model else None
         if model and self.types is not None:
-            self.items_panel.populate(self.types)
+            self.items.populate(self.types)
         self.layers.populate(af)                 # презентер сам считает counts и цвета
         self.objects.populate(af, model)         # obj-слои: счётчики из модели, цвета из common
         self._load_territories(m)
@@ -663,21 +661,6 @@ class MainWindow(QMainWindow):
         if want_objects:
             self.objects.show_building_at(x, z, af, colors, visible)
 
-
-    def on_items_selection(self, names: list[str]):
-        """Мультивыбор в Items: объединённый слой зданий отмеченных предметов."""
-        model = self.buildings_model
-        if not names or model is None or model.types is None:
-            self.view.set_buildings("items", None, None, (0, 0, 0))
-            self.items_panel.set_result(0)
-            return
-        selection = model.instances_for_items(names)
-        b = model.buildings
-        self.view.set_buildings("items", b.x[selection], b.z[selection],
-                                ITEM_LAYER_COLOR, indices=selection)
-        self.view.set_buildings_opacity(self.objects_layers.opacity("obj:"))
-        self.view.set_buildings_visible("items", True)
-        self.items_panel.set_result(len(selection))
 
     def on_layer_selected(self, key: str):
         """Выбор слоя (клик по строке / флагу в статистике): в режиме кисти делаем слой
