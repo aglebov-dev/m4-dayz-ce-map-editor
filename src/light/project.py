@@ -112,6 +112,24 @@ def _safe_provider(cfg: dict) -> dict:
     return out
 
 
+def save_layout(project: "Project", state_b64: str) -> None:
+    """Раскладка панелей (dock state, base64 от QMainWindow.saveState) — своя у каждого
+    проекта. Хранится в `<project>/layout.json`, отдельно от config (данных проекта)."""
+    with open(project.dir / "layout.json", "w", encoding="utf-8") as file:
+        json.dump({"state": state_b64}, file)
+
+
+def load_layout(project: "Project") -> str | None:
+    """Сохранённая раскладка панелей проекта (base64) или None."""
+    path = project.dir / "layout.json"
+    if path.is_file():
+        try:
+            return json.loads(path.read_text(encoding="utf-8")).get("state")
+        except Exception:
+            return None
+    return None
+
+
 def new_id(name: str) -> str:
     """Свободный id проекта из имени: только буквы/цифры, уникален среди appdata/projects."""
     base = "".join(c if c.isalnum() else "_" for c in name)[:32] or "proj"

@@ -209,6 +209,7 @@ class LightMainWindow(MainWindow):
     def open_project(self, proj: P.Project) -> bool:
         """Открыть проект. True — карта загружена; False — карты нет / файл повреждён
         (редактор показывать не нужно, сообщение уже показано)."""
+        self._save_project_layout()              # раскладку ТЕКУЩЕГО проекта — перед сменой
         self.project = proj
         # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/).
         # silent: своё понятное сообщение покажем ниже, без «миссии не найдены».
@@ -219,7 +220,8 @@ class LightMainWindow(MainWindow):
                 f"Не удалось открыть «{proj.name}»: карта не найдена или файл повреждён.")
             self.project = None
             return False
-        self.apply_gating()
+        self._restore_project_layout()           # раскладка панелей ЭТОГО проекта (если есть)
+        self.apply_gating()                      # гейтинг — после раскладки (последнее слово)
         self.button_bi_export.setEnabled(True)
         self.button_reload.setEnabled(True)
         has_snapshot = self.project.has_snapshot()
@@ -231,6 +233,35 @@ class LightMainWindow(MainWindow):
         if has_snapshot:
             self.diff_with_snapshot(raise_dock=False)
         return True
+
+    # ---------- раскладка панелей: своя для каждого проекта ----------
+
+    def _save_project_layout(self):
+        """Сохранить раскладку панелей текущего проекта (в его layout.json)."""
+        if not self.project:
+            return
+        try:
+            state = bytes(self.saveState().toBase64()).decode()
+            P.save_layout(self.project, state)
+        except Exception:
+            pass
+
+    def _restore_project_layout(self):
+        """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков)."""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        state = P.load_layout(self.project) if self.project else None
+        if not state:
+            return                               # нет своей раскладки — оставляем как есть
+        from PySide6.QtCore import QByteArray
+        try:
+            self.restoreState(QByteArray.fromBase64(state.encode()))
+        except Exception:
+            pass
+
+    def closeEvent(self, ev):
+        self._save_project_layout()              # раскладку проекта — при выходе
+        super().closeEvent(ev)                   # подтверждение правок + глобальная раскладка
 
     def diff_with_snapshot(self, raise_dock: bool = True):
         """Сравнить текущую карту со снапшотом проекта (исходным состоянием при создании)."""
