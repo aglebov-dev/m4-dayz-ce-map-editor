@@ -70,14 +70,14 @@ macos.permissions =
 mode = onefile
 
 # specify any extra nuitka arguments
-#  --include-data-dir=SRC=DEST : bundle assets read via core.paths.
-#     i18n (UI strings) and buildings (footprint dataset) are tiny and REQUIRED.
-#     Satellite tiles (assets/tiles ~108 MB) are NOT bundled: the user unpacks them from the
-#     game into %LOCALAPPDATA%/M4DayZCEMapEditor/tiles (or drops a ready pyramid there).
+#  Bundle ONLY the translations (i18n). Everything else the app builds into appdata itself:
+#  the user unpacks satellite tiles and generates building footprints from the game files
+#  (Background panel -> Unpack), landing in %LOCALAPPDATA%/M4DayZCEMapEditor/{tiles,buildings}.
+#  So assets/tiles and assets/buildings are NOT bundled.
 #  --include-package=paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
 #     If the build fails on the 'cryptography' dependency, drop this arg (SFTP off, rest works).
 # NOTE: keep this file ASCII-only — pyside6-deploy reads the spec as cp1252, not utf-8.
-extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/i18n=assets/i18n --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/buildings=assets/buildings --include-package=paramiko
+extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor/assets/i18n=assets/i18n --include-package=paramiko
 
 [buildozer]
 
