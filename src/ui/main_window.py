@@ -48,6 +48,7 @@ from ui.app_bus import AppBus
 from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
+from common.buildings import BuildingsModel
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
 from ui.map_view import MapView
@@ -563,9 +564,10 @@ class MainWindow(QMainWindow):
 
     def load_areaflags(self, m: Mission):
         self.areaflags = None
-        self.buildings = None
+        self.buildings_model = None              # common.buildings.BuildingsModel | None
+        self.buildings = None                    # алиасы модели (пока читают статистика/light)
         self.types = None
-        self.bld_eff_u = None                    # эффективные маски инстансов (numpy)
+        self.bld_eff_u = None
         self.bld_eff_v = None
         self.view.clear_buildings()
         self.view.clear_territories()
@@ -608,45 +610,20 @@ class MainWindow(QMainWindow):
         af = self.areaflags
         # снимок «как на диске»: по нему считается, сколько ячеек развела кисть
         self._af_orig = (af.usage.copy(), af.tier.copy())
+        # модель зданий (Qt-free) — источник для инспектора объектов/спавна/предметов
+        self.buildings_model = BuildingsModel.build(m.path, af)
+        model = self.buildings_model
+        self.buildings = model.buildings if model else None       # алиасы (статистика/light)
+        self.bld_eff_u = model.eff_u if model else None
+        self.bld_eff_v = model.eff_v if model else None
+        self.types = model.types if model else None
         objects = []
-        if os.path.isfile(os.path.join(m.path, "mapgroupproto.xml")) and \
-                os.path.isfile(os.path.join(m.path, "mapgrouppos.xml")):
-            try:
-                self.buildings = read_buildings(m.path, af.usages, af.values)
-                b = self.buildings
-                # эффективные маски всех инстансов разом (формула спавна)
-                ci = ((b.z / af.cell_size).astype(np.int64) * af.grid_x
-                      + (b.x / af.cell_size).astype(np.int64))
-                group_u = np.array([b.protos[n].usage_mask for n in b.names],
-                                   dtype=np.uint32)
-                group_v = np.array([b.protos[n].value_mask for n in b.names],
-                                   dtype=np.uint8)
-                self.bld_eff_u = group_u | af.usage[ci]
-                self.bld_eff_v = af.tier[ci] | group_v
-                # «без флагов»: пустые эффективные маски (не матчатся по usage/value)
-                n_noflags = int(np.count_nonzero((self.bld_eff_u == 0)
-                                                 & (self.bld_eff_v == 0)))
-                objects = [("obj:buildings", tr("layers.no_flags"),
-                            self.layer_color("obj:buildings"), n_noflags)]
-                # здания по эффективным флагам — отдельными тоглами в цвет флага
-                for bit, name in enumerate(af.values):
-                    cnt = int(np.count_nonzero(self.bld_eff_v >> np.uint8(bit) & 1))
-                    if cnt:
-                        key = f"obj:tier:{name}"
-                        objects.append((key, name, self.layer_color(key), cnt))
-                for bit, name in enumerate(af.usages):
-                    cnt = int(np.count_nonzero(self.bld_eff_u >> np.uint32(bit) & 1))
-                    if cnt:
-                        key = f"obj:usage:{name}"
-                        objects.append((key, name, self.layer_color(key), cnt))
-                try:
-                    self.types = read_types(m.path, af.usages, af.values)
-                    self.items_panel.populate(self.types)
-                except Exception:
-                    self.types = None
-            except Exception:
-                self.buildings = None
-                self.bld_eff_u = self.bld_eff_v = None
+        if model:
+            if self.types is not None:
+                self.items_panel.populate(self.types)
+            for key, name, count in model.layer_summary(af):
+                display = tr("layers.no_flags") if name is None else name
+                objects.append((key, display, self.layer_color(key), count))
         self.layers.populate(af)                 # презентер сам считает counts и цвета
         self.objects_layers.populate(objects)
         self._load_territories(m)
@@ -744,69 +721,32 @@ class MainWindow(QMainWindow):
             # объектам точку не ставим: подсвечиваем саму отметку здания/кластер
             self.view.set_selected_building(info["index"] if info else None)
             # калькулятор спавна: что может лежать в этом здании
-            if info and self.types:
-                proto = self.buildings.protos[info["name"]]
-                self.loot_panel.show_items(
-                    info["name"],
-                    items_for_building(self.types, proto, info["eff_u"], info["eff_v"]))
+            if info and self.types is not None:
+                self.loot_panel.show_items(info["name"],
+                                           self.buildings_model.items_for(info))
             else:
                 self.loot_panel.clear()
 
     def _buildings_subset(self, key: str) -> tuple:
-        """(x, z, глобальные индексы) инстансов слоя: без флагов или по биту маски."""
-        b = self.buildings
-        parts = key.split(":")
-        if len(parts) == 2:                      # obj:buildings — без флагов
-            sel = np.flatnonzero((self.bld_eff_u == 0) & (self.bld_eff_v == 0))
-        elif parts[1] == "tier":
-            bit = self.areaflags.values.index(parts[2])
-            sel = np.flatnonzero(self.bld_eff_v >> np.uint8(bit) & 1)
-        else:
-            bit = self.areaflags.usages.index(parts[2])
-            sel = np.flatnonzero(self.bld_eff_u >> np.uint32(bit) & 1)
-        return b.x[sel], b.z[sel], sel
-
-    BUILDING_PICK_M = 20.0                       # радиус выбора здания вокруг клика
+        return self.buildings_model.subset(key, self.areaflags)
 
     def _building_nearest(self, x: float, z: float) -> dict | None:
-        """Ближайший лутабельный инстанс в радиусе + эффективные флаги по формуле."""
-        b, af = self.buildings, self.areaflags
-        if b is None or af is None or not len(b.x):
-            return None
-        d2 = (b.x - x) ** 2 + (b.z - z) ** 2
-        i = int(np.argmin(d2))
-        dist = float(d2[i]) ** 0.5
-        if dist > self.BUILDING_PICK_M:
-            return None
-        bx, bz = float(b.x[i]), float(b.z[i])
-        proto = b.protos[b.names[i]]
-        idx = int(bz / af.cell_size) * af.grid_x + int(bx / af.cell_size)
-        cell_u, cell_t = int(af.usage[idx]), int(af.tier[idx])
-        return {
-            "index": i, "name": proto.name, "dist": dist, "x": bx, "z": bz,
-            "lootmax": proto.lootmax, "points": proto.points,
-            "group_u": proto.usage_mask, "group_v": proto.value_mask,
-            "cell_u": cell_u, "cell_v": cell_t,
-            "eff_u": proto.usage_mask | cell_u,          # usage группы ∪ ячейки
-            "eff_v": cell_t | proto.value_mask,          # тир ячейки ∪ value группы
-        }
+        return self.buildings_model.nearest(x, z, self.areaflags)
 
     def on_items_selection(self, names: list[str]):
         """Мультивыбор в Items: объединённый слой зданий отмеченных предметов."""
-        b = self.buildings
-        if not names or b is None or self.types is None or self.bld_eff_u is None:
+        model = self.buildings_model
+        if not names or model is None or model.types is None:
             self.view.set_buildings("items", None, None, (0, 0, 0))
             self.items_panel.set_result(0)
             return
-        parts = [instances_for_item(self.types[n], b, self.bld_eff_u, self.bld_eff_v)
-                 for n in names if n in self.types]
-        sel = (np.unique(np.concatenate(parts)) if parts
-               else np.empty(0, dtype=np.int64))
-        self.view.set_buildings("items", b.x[sel], b.z[sel], ITEM_LAYER_COLOR,
-                                indices=sel)
+        selection = model.instances_for_items(names)
+        b = model.buildings
+        self.view.set_buildings("items", b.x[selection], b.z[selection],
+                                ITEM_LAYER_COLOR, indices=selection)
         self.view.set_buildings_opacity(self.objects_layers.opacity("obj:"))
         self.view.set_buildings_visible("items", True)
-        self.items_panel.set_result(len(sel))
+        self.items_panel.set_result(len(selection))
 
     def on_layer_selected(self, key: str):
         """Выбор слоя (клик по строке / флагу в статистике): в режиме кисти делаем слой
