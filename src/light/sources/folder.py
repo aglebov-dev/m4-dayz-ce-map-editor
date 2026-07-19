@@ -20,6 +20,7 @@ class FolderProjectSource(ProjectSource):
 
     def build_widget(self) -> QWidget:
         widget = QWidget()
+        self.widget = widget                         # родитель для диалогов (source — QObject)
         layout = QVBoxLayout(widget)
 
         layout.addWidget(QLabel("Корневая папка сервера DayZ или папка миссии:"))
@@ -46,7 +47,8 @@ class FolderProjectSource(ProjectSource):
         return widget
 
     def _pick_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Корневая папка сервера или миссии")
+        folder = QFileDialog.getExistingDirectory(
+            self.widget, "Корневая папка сервера или миссии")
         if folder:
             self.folder_edit.setText(folder)
             self._connect()

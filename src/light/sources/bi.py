@@ -25,6 +25,7 @@ class BiProjectSource(ProjectSource):
         self._summary = None
 
         widget = QWidget()
+        self.widget = widget                         # родитель для диалогов (source — QObject)
         layout = QVBoxLayout(widget)
 
         layout.addWidget(QLabel("Папка проекта CE Tool (с XML-проектом и папкой layers):"))
@@ -61,7 +62,7 @@ class BiProjectSource(ProjectSource):
         return widget
 
     def _pick_folder(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Папка проекта CE Tool")
+        folder = QFileDialog.getExistingDirectory(self.widget, "Папка проекта CE Tool")
         if folder:
             self.folder_edit.setText(folder)
             self._read()
@@ -93,7 +94,7 @@ class BiProjectSource(ProjectSource):
         try:
             project = bi_import.create_project(folder, name)
         except Exception as error:
-            QMessageBox.critical(self.import_button, "Импорт BI",
+            QMessageBox.critical(self.widget, "Импорт BI",
                                  f"Не удалось импортировать: {error}")
             return
         self.emit_project(project)
