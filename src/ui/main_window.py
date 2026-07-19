@@ -513,7 +513,7 @@ class MainWindow(QMainWindow):
 
     def load_background(self, m: Mission):
         # датасет зданий (footprint) грузим вместе с подложкой — оба bundled и по миру
-        self.building_index = load_index(paths.assets_buildings, m.world)
+        self.building_index = load_index(paths.buildings_roots(), m.world)
         # 1) спутниковые тайлы
         meta = find_tiles(paths.assets_tiles, m.world)
         if meta:

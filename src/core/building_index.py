@@ -39,10 +39,14 @@ class BuildingIndex:
         return bool(self._footprints)
 
 
-def load_index(assets_dir, world: str) -> BuildingIndex | None:
-    """Прочитать `<assets_dir>/<world>.json`. None — если датасета для мира нет."""
-    path = Path(assets_dir) / f"{world}.json"
-    if not path.is_file():
+def load_index(roots, world: str) -> BuildingIndex | None:
+    """Прочитать `<root>/<world>.json` — первый найденный среди `roots` (папка или список
+    папок; порядок = приоритет, обычно appdata → bundled). None — если датасета для мира нет."""
+    if isinstance(roots, (str, Path)):
+        roots = [roots]
+    path = next((Path(r) / f"{world}.json" for r in roots
+                 if (Path(r) / f"{world}.json").is_file()), None)
+    if path is None:
         return None
     try:
         data = json.loads(path.read_text(encoding="utf-8"))

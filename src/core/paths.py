@@ -90,6 +90,12 @@ class AppPaths:
         return self.appdata / "tiles"
 
     @property
+    def buildings_cache(self) -> Path:
+        """Датасеты зданий, добавленные/сгенерированные пользователем (writable) — приоритетнее
+        bundled. Кладём сюда `<world>.json`, чтобы иметь здания не только для Chernarus."""
+        return self.appdata / "buildings"
+
+    @property
     def settings_file(self) -> Path:
         return self.appdata / "settings.json"
 
@@ -102,6 +108,10 @@ class AppPaths:
     def tile_roots(self) -> list[Path]:
         """Где искать готовые пирамиды подложек: сначала кэш, затем bundled."""
         return [self.tiles_cache, self.assets_tiles]
+
+    def buildings_roots(self) -> list[Path]:
+        """Где искать датасеты зданий: сначала appdata (пользовательские), затем bundled."""
+        return [self.buildings_cache, self.assets_buildings]
 
     @staticmethod
     def ensure(path: Path) -> Path:

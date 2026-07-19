@@ -338,7 +338,7 @@ class LightMainWindow(MainWindow):
         # датасет зданий грузим вместе с подложкой; каноничный мир — из background
         # (m.world у миссии-в-корне = имя папки, для датасета не годится, как и для тайлов)
         canon_world = bg.split(":", 1)[1] if bg.startswith("tiles") and ":" in bg else m.world
-        self.building_index = load_index(paths.assets_buildings, canon_world)
+        self.building_index = load_index(paths.buildings_roots(), canon_world)
         if bg.startswith("tiles"):
             world = bg.split(":", 1)[1] if ":" in bg else m.world
             meta = tiles_store.find(world)
