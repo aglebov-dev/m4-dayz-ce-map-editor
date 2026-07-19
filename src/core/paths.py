@@ -46,6 +46,11 @@ class AppPaths:
         """Готовые (bundled) пирамиды подложек, поставляемые с приложением."""
         return self.assets / "tiles"
 
+    @property
+    def assets_buildings(self) -> Path:
+        """Датасеты зданий (footprint по миру) — bundled, поставляются с приложением."""
+        return self.assets / "buildings"
+
     # ---- записываемые данные приложения ----
 
     @property

@@ -14,6 +14,7 @@ CLICK_SLOP_PX = 4
 
 from core.tiles import TileMeta, iter_zoom_tiles
 from ui.buildings_item import BuildingsItem, ClustersItem
+from ui.footprints_item import FootprintsItem
 from ui.shape_item import GRAB_PX, ShapeItem
 from ui.territories_item import TerritoriesItem
 from ui.zone_labels_item import ZoneLabelsItem
@@ -76,6 +77,10 @@ class MapView(QGraphicsView):
         self._terr_opacity = 1.0
         self._bld_opacity = 1.0
         self._bld_selected: int | None = None    # глобальный индекс выделенного
+        # слои контуров зданий (footprint): key -> {"corners","idx","color","item","visible"}
+        self._fp_layers: dict[str, dict] = {}
+        self._fp_opacity = 1.0
+        self._fp_selected: int | None = None
         # подписи зон выбранного слоя: сами данные + состояние тогла
         self._zone_labels: ZoneLabelsItem | None = None
         self._zone_labels_args: tuple | None = None   # (zones, cell_size, color)
@@ -569,6 +574,70 @@ class MapView(QGraphicsView):
             pos = np.flatnonzero(uniq == self._bld_selected)
             sel = int(pos[0]) if len(pos) else None
         self._bld_clusters.set_data(ux, uz, sel)
+
+    # ---------- контуры зданий (footprint; фича «Здания») ----------
+
+    def set_footprints(self, key: str, corners, color: tuple[int, int, int],
+                       indices=None):
+        """Слой контуров зданий. corners — (M,4,2) мировые углы; corners=None — убрать слой."""
+        old = self._fp_layers.pop(key, None)
+        if old and old["item"]:
+            self.scene().removeItem(old["item"])
+        if corners is None:
+            return
+        visible = old["visible"] if old else False
+        self._fp_layers[key] = {"corners": corners, "idx": indices,
+                                "color": color, "item": None, "visible": visible}
+        self._apply_footprints(key)
+
+    def clear_footprints(self):
+        self._fp_selected = None
+        for key in list(self._fp_layers):
+            self.set_footprints(key, None, (0, 0, 0))
+
+    def set_footprints_visible(self, key: str, b: bool):
+        fp = self._fp_layers.get(key)
+        if not fp:
+            return
+        fp["visible"] = b
+        if fp["item"]:
+            fp["item"].setVisible(b)
+
+    def set_footprints_color(self, key: str, color: tuple[int, int, int]):
+        fp = self._fp_layers.get(key)
+        if not fp:
+            return
+        fp["color"] = color
+        if fp["item"]:
+            fp["item"].set_color(color)
+
+    def set_footprints_opacity(self, v: float):
+        """Общая прозрачность всех слоёв контуров (слайдер секции «Здания»)."""
+        self._fp_opacity = v
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].setOpacity(v)
+
+    def set_selected_footprint(self, index: int | None):
+        """Подсветить здание во всех слоях контуров (глобальный индекс инстанса)."""
+        self._fp_selected = index
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].set_selected(fp["item"].local_of(index))
+
+    def _apply_footprints(self, key: str):
+        fp = self._fp_layers[key]
+        if fp["item"]:
+            self.scene().removeItem(fp["item"])
+        margin = self._meta.margin if self._meta else 0
+        item = FootprintsItem(fp["corners"], self._world_size, margin, fp["color"],
+                              indices=fp["idx"])
+        item.setZValue(31)                       # над точками зданий (30), под подписями зон (40)
+        item.setVisible(fp["visible"])
+        item.setOpacity(self._fp_opacity)
+        item.set_selected(item.local_of(self._fp_selected))
+        self.scene().addItem(item)
+        fp["item"] = item
 
     def add_border(self):
         """Рамка по краю карты: видно, где кончаются данные, а не просто тёмное море."""

@@ -48,9 +48,11 @@ from ui.layers_presenter import LayersPresenter
 from ui.zones_presenter import ZonesPresenter
 from ui.inspector_presenter import InspectorPresenter
 from ui.objects_presenter import ObjectsPresenter
+from ui.buildings_presenter import BuildingsPresenter
 from ui.items_presenter import ItemsPresenter
 from ui.territories_presenter import TerritoriesPresenter
 from common.buildings import BuildingsModel
+from core.building_index import load_index
 from common.layer_colors import LayerColors
 from ui.loot_panel import LootPanel
 from ui.map_view import MapView
@@ -158,6 +160,13 @@ class MainWindow(QMainWindow):
         self.dock_obj_layers = self.objects.dock_layers
         self.dock_objects = self.objects.dock_inspector
         self.dock_loot = self.objects.dock_loot
+
+        # === фича «Здания» (контуры footprint; те же слои/цвета, своя прозрачность) ===
+        self.buildings_feature = BuildingsPresenter(
+            self, view=self.view, colors=self.colors, settings=self.settings,
+            mission=self.current_mission, bus=self.bus, wrap=self._dock_widget)
+        self.building_index = None                       # core.building_index.BuildingIndex | None
+        self.dock_buildings = self.buildings_feature.dock
 
         # === фича «Территории» (круги животных): ui/territories_presenter.py ===
         self.territories = TerritoriesPresenter(
@@ -269,9 +278,9 @@ class MainWindow(QMainWindow):
         self.tb_tools = QToolBar("tools")
         self.tb_tools.setMovable(False)
         self.addToolBar(self.tb_tools)
-        for dock in (self.dock_layers, self.dock_obj_layers, self.dock_brush,
-                     self.dock_territories, self.dock_items, self.dock_zones,
-                     self.dock_stats, self.dock_diff, self.dock_ce,
+        for dock in (self.dock_layers, self.dock_obj_layers, self.dock_buildings,
+                     self.dock_brush, self.dock_territories, self.dock_items,
+                     self.dock_zones, self.dock_stats, self.dock_diff, self.dock_ce,
                      self.dock_inspector, self.dock_objects, self.dock_loot):
             self._register_dock_button(dock)
 
@@ -308,7 +317,8 @@ class MainWindow(QMainWindow):
         self.addDockWidget(L, self.dock_layers)
         self.addDockWidget(L, self.dock_obj_layers)
         self.splitDockWidget(self.dock_layers, self.dock_obj_layers, V)
-        self.tabifyDockWidget(self.dock_obj_layers, self.dock_brush)
+        self.tabifyDockWidget(self.dock_obj_layers, self.dock_buildings)
+        self.tabifyDockWidget(self.dock_buildings, self.dock_brush)
         self.tabifyDockWidget(self.dock_brush, self.dock_territories)
         self.addDockWidget(R, self.dock_items)
         self.addDockWidget(R, self.dock_objects)
@@ -507,6 +517,8 @@ class MainWindow(QMainWindow):
         self.load_areaflags(m)
 
     def load_background(self, m: Mission):
+        # датасет зданий (footprint) грузим вместе с подложкой — оба bundled и по миру
+        self.building_index = load_index(paths.assets_buildings, m.world)
         # 1) спутниковые тайлы
         meta = find_tiles(paths.assets_tiles, m.world)
         if meta:
@@ -550,12 +562,14 @@ class MainWindow(QMainWindow):
         self.bld_eff_u = None
         self.bld_eff_v = None
         self.view.clear_buildings()
+        self.view.clear_footprints()
         self.view.clear_territories()
         self.territories.clear()
         self.items.clear()
         self.view.clear_overlays()
         self.layers.clear()                      # презентер слоёв: панель + кэш пиксмапов
         self.objects.clear()                     # obj-слои + инспектор объектов + спавн
+        self.buildings_feature.clear()           # слои контуров зданий (footprint)
         self.zones.clear()
         self.view.clear_region()                 # выделение принадлежит прошлой карте
         self.stats_panel.clear()
@@ -597,6 +611,7 @@ class MainWindow(QMainWindow):
             self.items.populate(self.types)
         self.layers.populate(af)                 # презентер сам считает counts и цвета
         self.objects.populate(af, model)         # obj-слои: счётчики из модели, цвета из common
+        self.buildings_feature.populate(af, model, self.building_index)   # контуры footprint
         self._load_territories(m)
         self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
                                   + [(f"usage:{n}", n) for n in af.usages])
@@ -633,7 +648,8 @@ class MainWindow(QMainWindow):
         if want_layers:
             self.inspector.show_at(x, z, af, colors, visible, water=self._water_at(x, z))
         if want_objects:
-            self.objects.show_building_at(x, z, af, colors, visible)
+            index = self.objects.show_building_at(x, z, af, colors, visible)
+            self.buildings_feature.select_building(index)   # тот же footprint — красным
 
 
     def on_layer_selected(self, key: str):

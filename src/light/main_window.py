@@ -9,9 +9,11 @@ import numpy as np
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButton
 from PySide6.QtGui import QIcon
 
+from core.building_index import load_index
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
 )
+from core.paths import paths
 from light import project as P
 from light.gating import missing_for, tool_ok
 from ui.main_window import MainWindow
@@ -23,6 +25,7 @@ DOCK_TOOL = {
     "dock_zones": "map", "dock_stats": "map",
     "dock_diff": "map", "dock_ce": "map",
     "dock_obj_layers": "objects", "dock_objects": "objects",
+    "dock_buildings": "objects",   # контуры зданий — те же файлы, что «Объекты»
     "dock_items": "economy", "dock_loot": "economy",
     # территории убраны из лёгкого редактора: env/*.xml не материализуются (панель пуста)
 }
@@ -317,6 +320,10 @@ class LightMainWindow(MainWindow):
         from light import tiles_store
         proj = getattr(self, "project", None)    # super().__init__ может звать до нас
         bg = proj.background if proj else ""
+        # датасет зданий грузим вместе с подложкой; каноничный мир — из background
+        # (m.world у миссии-в-корне = имя папки, для датасета не годится, как и для тайлов)
+        canon_world = bg.split(":", 1)[1] if bg.startswith("tiles") and ":" in bg else m.world
+        self.building_index = load_index(paths.assets_buildings, canon_world)
         if bg.startswith("tiles"):
             world = bg.split(":", 1)[1] if ":" in bg else m.world
             meta = tiles_store.find(world)

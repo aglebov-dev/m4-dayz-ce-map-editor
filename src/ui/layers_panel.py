@@ -249,10 +249,15 @@ class LayersPanel(QWidget):
 
 
 class ObjectsLayersPanel(LayersPanel):
-    """Отдельная панель слоёв объектов (здания по флагам). Тот же контракт сигналов."""
+    """Отдельная панель слоёв объектов (здания по флагам). Тот же контракт сигналов.
+    Ключи строк — `obj:…` (общие с фичей «Здания»); отличаются только заголовок раздела
+    и свой слайдер прозрачности (см. `_header_key`/`_opacity_tip_key`)."""
+
+    _header_key = "layers.objects"
+    _opacity_tip_key = "layers.obj_opacity_tip"
 
     def _init_sliders(self):
-        self.sld_obj = self._make_slider("obj:", 100, tr("layers.obj_opacity_tip"))
+        self.sld_obj = self._make_slider("obj:", 100, tr(self._opacity_tip_key))
 
     def opacity(self, prefix: str) -> float:
         return self.sld_obj.value() / 100.0
@@ -261,11 +266,19 @@ class ObjectsLayersPanel(LayersPanel):
         """objects: (key, имя, цвет, счётчик)."""
         self.clear()
         if objects:
-            self._add_header(tr("layers.objects"), "obj:")
+            self._add_header(tr(self._header_key), "obj:")
             self._list_lay.addWidget(self.sld_obj)
             for key, name, color, count in objects:
                 self._add_row(key, name, color, count)
         self._list_lay.addStretch(1)
+
+
+class BuildingsLayersPanel(ObjectsLayersPanel):
+    """Слои контуров зданий (footprint). Те же `obj:`-ключи и цвета, что у «Объектов»
+    (маркеры совпадают), но свой заголовок и свой слайдер прозрачности."""
+
+    _header_key = "layers.buildings"
+    _opacity_tip_key = "layers.bld_opacity_tip"
 
 
 class TerritoriesPanel(LayersPanel):

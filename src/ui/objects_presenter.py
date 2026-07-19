@@ -41,10 +41,13 @@ class ObjectsPresenter(QObject):
         self._built: set[str] = set()            # какие оверлеи зданий уже построены
 
         # --- obj-слои (здания по флагам) ---
+        self._bus = bus
         self.obj_layers = ObjectsLayersPanel(parent)
         self.obj_layers.layer_toggled.connect(self._on_toggled)
         self.obj_layers.color_clicked.connect(self._on_color_clicked)
         self.obj_layers.opacity_changed.connect(self._on_opacity)
+        # цвета общие с фичей «Здания»: перекрасили там — синхронно тут
+        bus.layer_color_changed.connect(self._on_color_synced)
         self.dock_layers = QDockWidget(tr("layers.objects"), parent)
         self.dock_layers.setObjectName("dock_obj_layers")
         self.dock_layers.setWidget(wrap(self.obj_layers))
@@ -128,18 +131,34 @@ class ObjectsPresenter(QObject):
         self._settings.save()
         self.obj_layers.row(key).set_color(rgb)
         self._view.set_buildings_color(key, rgb)
+        self._bus.layer_color_changed.emit(key, rgb)   # синхронизировать «Здания»
+
+    def _on_color_synced(self, key: str, rgb: tuple[int, int, int]) -> None:
+        """Цвет obj-слоя изменили в панели «Здания» — отразить у себя (без сохранения
+        и без повторного эмита, иначе петля)."""
+        if not key.startswith("obj:"):
+            return
+        try:
+            self.obj_layers.row(key).set_color(rgb)
+        except StopIteration:
+            return
+        self._view.set_buildings_color(key, rgb)
 
     # ---------- клик по карте (объектная половина общего диспетчера) ----------
 
     def show_building_at(self, x: float, z: float, areaflags, colors: dict,
-                         visible: dict) -> None:
+                         visible: dict) -> int | None:
+        """Возвращает глобальный индекс выбранного здания (или None) — чтобы фича
+        «Здания» подсветила тот же footprint."""
         model = self._model
         if model is None:
-            return
+            return None
         info = model.nearest(x, z, areaflags)
+        index = info["index"] if info else None
         self.inspector_panel.show_building(info, areaflags, colors, visible)
-        self._view.set_selected_building(info["index"] if info else None)
+        self._view.set_selected_building(index)
         if info and model.types is not None:
             self.loot_panel.show_items(info["name"], model.items_for(info))
         else:
             self.loot_panel.clear()
+        return index

@@ -18,6 +18,10 @@ settings.json
 # служебные данные приложения (подложки, конфиги проектов, снапшоты)
 appdata/
 
+# датасеты зданий (извлечены из ассетов BI; см. EULA перед публикацией) — bundled-ассет,
+# как тайлы: поставляется отдельно, в git не держим
+/assets/buildings/
+
 /assets/i18n/en.json
 /assets/i18n/ru.json
 /assets/tiles/chernarusplus/0/0_0.jpg
