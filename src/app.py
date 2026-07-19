@@ -45,6 +45,32 @@ def _install_crash_logging():
 
     sys.excepthook = hook
 
+    # Сообщения самого Qt (ASSERT/warning/fatal при работе с доками и пр.) идут в stderr
+    # мимо Python — в onefile теряются, в консоли уплывают. Дублируем в crash.log, чтобы
+    # видеть ПРИЧИНУ нативного abort (qFatal), которого не покрывает excepthook.
+    from PySide6.QtCore import qInstallMessageHandler, QtMsgType
+    _label = {QtMsgType.QtDebugMsg: "DEBUG", QtMsgType.QtInfoMsg: "INFO",
+              QtMsgType.QtWarningMsg: "WARNING", QtMsgType.QtCriticalMsg: "CRITICAL",
+              QtMsgType.QtFatalMsg: "FATAL"}
+
+    def qt_handler(mode, ctx, msg):
+        try:
+            sys.stderr.write(f"[Qt {_label.get(mode, '?')}] {msg}\n")
+        except Exception:
+            pass
+        if mode in (QtMsgType.QtWarningMsg, QtMsgType.QtCriticalMsg,
+                    QtMsgType.QtFatalMsg):
+            try:
+                _crash_log.write(f"\n==== {datetime.now():%Y-%m-%d %H:%M:%S} "
+                                 f"Qt {_label.get(mode, '?')} ====\n{msg}\n")
+                if ctx and ctx.file:
+                    _crash_log.write(f"    at {ctx.file}:{ctx.line}\n")
+                _crash_log.flush()
+            except Exception:
+                pass
+
+    qInstallMessageHandler(qt_handler)
+
 
 def main():
     _install_crash_logging()

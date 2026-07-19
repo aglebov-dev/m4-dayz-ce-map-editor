@@ -90,7 +90,19 @@ class LightMainWindow(MainWindow):
                     act.setVisible(False)
 
     def _cap_floating(self, dock):
-        """Отцепили панель — высота не больше половины экрана."""
+        """Отцепили панель — высота не больше половины экрана. resize ОТКЛАДЫВАЕМ на
+        следующий тик: менять геометрию дока прямо внутри topLevelChanged (Qt ещё
+        перестраивает layout, мышь захвачена) — ре-энтрантность в раскладку доков и
+        нативный abort (qFatal). После тика док уже верхнеуровневое окно — resize безопасен."""
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda d=dock: self._cap_floating_now(d))
+
+    def _cap_floating_now(self, dock):
+        try:
+            if not dock.isFloating():             # успели вернуть в док — ничего не делаем
+                return
+        except RuntimeError:
+            return                                # док уже разрушен
         scr = self.screen().availableGeometry() if self.screen() else None
         if not scr:
             return
