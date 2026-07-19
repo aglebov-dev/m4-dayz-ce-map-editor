@@ -98,6 +98,10 @@ class MapView(QGraphicsView):
         # "merged" — единые кружки (v2); "per-layer" — каждый слой в своём кружке (v1)
         self.cluster_mode = "merged"
         self._content = None                     # QRectF карты (сцена шире на поля пана)
+        # «режим вписывания»: пока пользователь не зумил, карта следует за размером окна.
+        # Надёжнее геометрической проверки: стартовый fit до show() мог пройти при неверном
+        # размере вьюпорта — тогда карта «съезжала» в левый верхний угол до первого зума.
+        self._auto_fit = True
 
     # ---------- загрузка подложки ----------
 
@@ -655,6 +659,7 @@ class MapView(QGraphicsView):
     def fit_all(self):
         rect = self._content if self._content is not None else self.scene().sceneRect()
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._auto_fit = True                    # карта вписана — следуем за размером окна
         self._schedule_tiles_update()
 
     def zoom_to_world(self, x0: float, z0: float, x1: float, z1: float,
@@ -671,6 +676,7 @@ class MapView(QGraphicsView):
         s = self.transform().m11()
         if s > max_scale:                        # крошечная зона — не зумим до пикселей
             self.scale(max_scale / s, max_scale / s)
+        self._auto_fit = False                   # прицельный зум — окно больше не вписывает
         self._schedule_tiles_update()
 
     def fit_all_deferred(self):
@@ -697,6 +703,7 @@ class MapView(QGraphicsView):
         cur = self.transform().m11()
         if MIN_SCALE <= cur * factor <= MAX_SCALE:
             self.scale(factor, factor)
+            self._auto_fit = False               # пользователь зумит — окно больше не вписывает
             self._schedule_tiles_update()
 
     def scrollContentsBy(self, dx, dy):
@@ -704,20 +711,13 @@ class MapView(QGraphicsView):
         self._schedule_tiles_update()
 
     def resizeEvent(self, ev):
-        """Вьюпорт изменился (разворот окна, открытие/закрытие панелей). Раньше трансформа
-        не менялась — при увеличении окна карта переставала вписываться (скроллбары, «съехал»
-        масштаб). Если карта была вписана целиком, держим её вписанной и после ресайза
-        (масштаб следует за окном). Если пользователь был приближён — зум не трогаем."""
-        from PySide6.QtCore import QRect
-        old = ev.oldSize()
-        refit = False
-        if (getattr(self, "_shown_once", False) and self._content is not None
-                and old.isValid() and old.width() > 0 and old.height() > 0):
-            vis = self.mapToScene(QRect(0, 0, old.width(), old.height())).boundingRect()
-            refit = (vis.width() >= self._content.width() * 0.98
-                     and vis.height() >= self._content.height() * 0.98)
+        """Вьюпорт изменился (разворот окна, открытие/закрытие панелей, ПЕРВЫЙ показ после
+        загрузки до show). В режиме вписывания (`_auto_fit`, пока пользователь не зумил)
+        держим карту вписанной и после ресайза — масштаб следует за окном. Это же чинит
+        стартовый «съезд» в левый верхний угол: первый корректный размер приходит именно
+        сюда, и мы перевписываем. Если пользователь приближён — зум не трогаем."""
         super().resizeEvent(ev)
-        if refit:
+        if self._auto_fit and self._content is not None:
             self.fit_all()
         self._schedule_tiles_update()
 
