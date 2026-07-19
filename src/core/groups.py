@@ -39,6 +39,7 @@ class Buildings:
     names: list[str]     # имя группы каждого инстанса
     x: np.ndarray        # float32[n]
     z: np.ndarray
+    yaw: np.ndarray      # float32[n] — истинный модельный yaw (град) из mapgrouppos
 
 
 def read_user_aliases(mission_path: str, usages: list[str],
@@ -101,6 +102,7 @@ def read_buildings(mission_path: str, usages: list[str], values: list[str]) -> B
     names: list[str] = []
     xs: list[float] = []
     zs: list[float] = []
+    yaws: list[float] = []
     pos_root = ET.parse(os.path.join(mission_path, "mapgrouppos.xml")).getroot()
     for g in pos_root.findall("group"):
         name = g.get("name")
@@ -110,5 +112,22 @@ def read_buildings(mission_path: str, usages: list[str], values: list[str]) -> B
         names.append(name)
         xs.append(float(p[0]))
         zs.append(float(p[2]))
+        yaws.append(_instance_yaw(g))
     return Buildings(protos=protos, names=names,
-                     x=np.array(xs, dtype=np.float32), z=np.array(zs, dtype=np.float32))
+                     x=np.array(xs, dtype=np.float32), z=np.array(zs, dtype=np.float32),
+                     yaw=np.array(yaws, dtype=np.float32))
+
+
+def _instance_yaw(g: ET.Element) -> float:
+    """Истинный модельный yaw (град) инстанса из mapgrouppos. Формат BI/DayZ Editor:
+    `rpy="roll pitch yaw"` (третье значение = yaw) и/или `a` (азимут), причём `a = 90 − yaw`.
+    Берём yaw из rpy; если его нет — восстанавливаем из `a`; нет и его — 0."""
+    rpy = g.get("rpy")
+    if rpy:
+        parts = rpy.split()
+        if len(parts) == 3:
+            return float(parts[2])
+    a = g.get("a")
+    if a is not None:
+        return 90.0 - float(a)
+    return 0.0

@@ -84,7 +84,8 @@ class BuildingsPresenter(QObject):
         if visible and model is not None and index is not None and key not in self._built:
             xs, zs, selection = model.subset(key, self._af)
             names = [model.buildings.names[i] for i in selection]
-            corners, kept = oriented_corners(xs, zs, names, index)
+            yaws = model.buildings.yaw[selection]        # yaw из mapgrouppos (не датасета)
+            corners, kept = oriented_corners(xs, zs, names, yaws, index)
             self._view.set_footprints(key, corners, self._colors.color(key),
                                       indices=selection[kept])
             self._view.set_footprints_opacity(self.panel.opacity("obj:"))
