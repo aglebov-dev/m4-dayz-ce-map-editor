@@ -219,7 +219,27 @@ def materialize(project: Project, provider: DataProvider) -> str:
         rel = f"{project.mission_name}/{cand}".strip("/")
         local = os.path.join(target, cand.replace("/", os.sep))
         provider.fetch_to(rel, local)
+    _materialize_extra_types(project, provider, target)
     return target
+
+
+def _materialize_extra_types(project: Project, provider: DataProvider, target: str) -> None:
+    """Доп. type-файлы кастомного сервера из cfgeconomycore.xml — тянем рядом, чтобы редактор
+    видел не только ванильный db/types.xml. cfgeconomycore уже материализован (роль economycore);
+    парсим локальную копию и докачиваем каждый type-файл провайдером."""
+    from core.types import ce_type_files
+    core_local = os.path.join(target, "cfgeconomycore.xml")
+    if not os.path.isfile(core_local):
+        return
+    for rel in ce_type_files(core_local):
+        local = os.path.join(target, rel.replace("/", os.sep))
+        if os.path.isfile(local):                # db/types.xml и уже скачанное не трогаем
+            continue
+        remote = f"{project.mission_name}/{rel}".strip("/")
+        try:
+            provider.fetch_to(remote, local)
+        except Exception:
+            pass                                 # нет файла у провайдера — пропускаем, не критично
 
 
 def make_snapshot(project: Project):
