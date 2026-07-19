@@ -186,7 +186,8 @@ class LightMainWindow(MainWindow):
 
     def open_project(self, proj: P.Project):
         self.project = proj
-        self.load_workdir(proj.workdir)          # ядро читает материализованную миссию
+        # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/)
+        self.load_workdir(proj.workdir, proj.mission_name)
         self.apply_gating()
         self.button_bi_export.setEnabled(True)
         self.button_reload.setEnabled(True)

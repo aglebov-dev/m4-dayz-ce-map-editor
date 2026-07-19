@@ -62,12 +62,13 @@ class Project:
 
     @property
     def workdir(self) -> Path:
-        """Корень, который читает ядро: `scan_workdir` ищет миссии в `<workdir>/data/*`."""
+        """Корень, который читает ядро: `scan_workdir` ищет миссию в `<workdir>/data`."""
         return self.dir
 
     @property
     def data_dir(self) -> Path:
-        """Куда материализуются миссии: `<dir>/data/<миссия>/…`."""
+        """Куда материализуются файлы миссии — прямо в `<dir>/data` (без подпапки по имени
+        миссии; имя миссии хранится в config.json)."""
         return self.workdir / "data"
 
     @property
@@ -76,11 +77,16 @@ class Project:
 
     @property
     def mission_dir(self) -> Path:
-        """Локальная папка миссии (материализованная) — её читает ядро. Отдельная
-        подпапка внутри data_dir (для миссии-в-корне — 'mission'), чтобы очистка миссии
-        не задевала прочее содержимое папки проекта."""
-        base = Path(self.mission_name.rstrip("/")).name or "mission"
-        return self.data_dir / base
+        """Папка с файлами миссии, которую читает ядро. НОВЫЕ проекты — плоские (файлы прямо
+        в data/). СТАРЫЕ проекты с подпапкой `data/<миссия>/` поддерживаются: если такая есть
+        и в data/ нет плоской карты — используем её (имя миссии всё равно в config.json)."""
+        if (self.data_dir / "areaflags.map").exists() \
+                or (self.data_dir / "cfglimitsdefinition.xml").exists():
+            return self.data_dir
+        nested = self.data_dir / (Path(self.mission_name.rstrip("/")).name or "mission")
+        if nested.exists():
+            return nested
+        return self.data_dir
 
     # --- сохранение конфигурации ---
     def save(self):
@@ -195,25 +201,25 @@ def missing_required(files: dict) -> list[str]:
 # ---------- материализация и снапшот ----------
 
 def materialize(project: Project, provider: DataProvider) -> str:
-    """Скачать/скопировать выбранные файлы в папку миссии. Возвращает её путь.
-    Очищаем ТОЛЬКО mission_dir (не весь data_dir): при выбранной пользователем папке
-    проекта там может лежать и постороннее — стирать её целиком нельзя."""
-    if os.path.isdir(project.mission_dir):
-        shutil.rmtree(project.mission_dir)
+    """Скачать/скопировать выбранные файлы миссии в папку проекта. Возвращает её путь.
+    Целевую папку берём ОДИН раз: у новых проектов это плоская data/, у старых — их
+    подпапка data/<миссия>/ (чтобы реоформление не «переезжало» неожиданно)."""
+    target = str(project.mission_dir)
+    if os.path.isdir(target):
+        shutil.rmtree(target)
     for role_key, cand in project.files.items():
         rel = f"{project.mission_name}/{cand}".strip("/")
-        local = os.path.join(project.mission_dir, cand.replace("/", os.sep))
+        local = os.path.join(target, cand.replace("/", os.sep))
         provider.fetch_to(rel, local)
-    return project.mission_dir
+    return target
 
 
 def make_snapshot(project: Project):
-    """Снимок текущей материализованной миссии — эталон Дифа (перезаписывает старый).
-    Копируем именно mission_dir (а не data_dir): в папке проекта могло быть постороннее."""
+    """Снимок материализованной миссии — эталон Дифа (перезаписывает старый). Кладём файлы
+    прямо в snapshot/ (без подпапки по имени миссии)."""
     if os.path.isdir(project.snapshot_dir):
         shutil.rmtree(project.snapshot_dir)
-    dest = os.path.join(project.snapshot_dir, os.path.basename(project.mission_dir))
-    shutil.copytree(project.mission_dir, dest)
+    shutil.copytree(str(project.mission_dir), str(project.snapshot_dir))
 
 
 def delete_snapshot(project: Project):
@@ -222,22 +228,24 @@ def delete_snapshot(project: Project):
 
 
 def load_snapshot_from(project: Project, provider: DataProvider, mission_rel: str):
-    """Ручной снапшот: взять areaflags+cfglimits у другого источника (сервер/проект BI)."""
+    """Ручной снапшот: взять areaflags+cfglimits у другого источника (сервер/проект BI).
+    Кладём прямо в snapshot/."""
     if os.path.isdir(project.snapshot_dir):
         shutil.rmtree(project.snapshot_dir)
-    dest_mission = os.path.join(project.snapshot_dir,
-                                os.path.basename(mission_rel) or "mission")
     for cand in ("areaflags.map", "cfglimitsdefinition.xml",
                  "cfglimitsdefinitionuser.xml"):
         rel = f"{mission_rel}/{cand}".strip("/")
         if provider.exists(rel):
-            provider.fetch_to(rel, os.path.join(dest_mission, cand))
+            provider.fetch_to(rel, os.path.join(str(project.snapshot_dir), cand))
 
 
 def snapshot_mission_dir(project: Project) -> str | None:
-    """Локальная папка миссии внутри снапшота (для чтения ядром)."""
+    """Папка снапшота для чтения ядром. Плоский снапшот — сам snapshot/; старый (с подпапкой
+    по имени миссии) — эта подпапка."""
     if not project.has_snapshot():
         return None
+    if (project.snapshot_dir / "areaflags.map").exists():
+        return str(project.snapshot_dir)
     subs = [d for d in os.listdir(project.snapshot_dir)
             if os.path.isdir(os.path.join(project.snapshot_dir, d))]
-    return os.path.join(project.snapshot_dir, subs[0]) if subs else None
+    return os.path.join(str(project.snapshot_dir), subs[0]) if subs else None

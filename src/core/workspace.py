@@ -35,23 +35,29 @@ def _world_size_from_areaflags(path: str) -> int | None:
     return size_x or None
 
 
-def _make_mission(path: str) -> Mission:
-    name = os.path.basename(os.path.normpath(path))
-    world = name.rsplit(".", 1)[-1].lower() if "." in name else name.lower()
+def _make_mission(path: str, name: str = "") -> Mission:
+    """Mission из папки. `name` (если задан, напр. из config проекта) переопределяет имя,
+    выведенное из папки — нужно для плоской раскладки, где папка называется 'data'."""
+    label = os.path.basename((name or path).rstrip("/\\")) or "mission"
+    world = label.rsplit(".", 1)[-1].lower() if "." in label else label.lower()
     size = _world_size_from_areaflags(path) or 15360
     return Mission(
-        name=name, path=path, world=world, world_size=size,
+        name=label, path=path, world=world, world_size=size,
         has_areaflags=os.path.isfile(os.path.join(path, "areaflags.map")),
     )
 
 
-def scan_workdir(root: str) -> list[Mission]:
-    """Ищет карты: <root>/mpmissions/*, затем <root>/* как миссии, затем сам root."""
+def scan_workdir(root: str, mission_name: str = "") -> list[Mission]:
+    """Ищет карты. Плоская раскладка проекта: файлы миссии прямо в <root>/data — тогда имя
+    миссии берём из `mission_name` (config). Иначе (старая раскладка/сервер): <root>/data/*,
+    затем <root>/*, затем сам root."""
+    data = os.path.join(root, "data")
+    if _looks_like_mission(data):                # плоская раскладка проекта
+        return [_make_mission(data, name=mission_name)]
     found: list[Mission] = []
-    mp = os.path.join(root, "data")
-    if os.path.isdir(mp):
-        for d in sorted(os.listdir(mp)):
-            p = os.path.join(mp, d)
+    if os.path.isdir(data):
+        for d in sorted(os.listdir(data)):
+            p = os.path.join(data, d)
             if os.path.isdir(p) and _looks_like_mission(p):
                 found.append(_make_mission(p))
     if not found and os.path.isdir(root):

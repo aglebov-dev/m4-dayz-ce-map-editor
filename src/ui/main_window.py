@@ -469,9 +469,9 @@ class MainWindow(QMainWindow):
         if d:
             self.load_workdir(d)
 
-    def load_workdir(self, d: str):
+    def load_workdir(self, d: str, mission_name: str = ""):
         d = os.fspath(d)                         # принимаем Path (project.workdir) и str
-        self.missions = scan_workdir(d)
+        self.missions = scan_workdir(d, mission_name)   # имя миссии из config (плоская раскладка)
         self.settings.workdir = d
         self.settings.save()
         self.btn_workdir.setText(
