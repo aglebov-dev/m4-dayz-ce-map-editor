@@ -77,15 +77,7 @@ class Project:
 
     @property
     def mission_dir(self) -> Path:
-        """Папка с файлами миссии, которую читает ядро. НОВЫЕ проекты — плоские (файлы прямо
-        в data/). СТАРЫЕ проекты с подпапкой `data/<миссия>/` поддерживаются: если такая есть
-        и в data/ нет плоской карты — используем её (имя миссии всё равно в config.json)."""
-        if (self.data_dir / "areaflags.map").exists() \
-                or (self.data_dir / "cfglimitsdefinition.xml").exists():
-            return self.data_dir
-        nested = self.data_dir / (Path(self.mission_name.rstrip("/")).name or "mission")
-        if nested.exists():
-            return nested
+        """Папка с файлами миссии = сама data/ (плоская раскладка; имя миссии — в config.json)."""
         return self.data_dir
 
     # --- сохранение конфигурации ---
@@ -201,10 +193,8 @@ def missing_required(files: dict) -> list[str]:
 # ---------- материализация и снапшот ----------
 
 def materialize(project: Project, provider: DataProvider) -> str:
-    """Скачать/скопировать выбранные файлы миссии в папку проекта. Возвращает её путь.
-    Целевую папку берём ОДИН раз: у новых проектов это плоская data/, у старых — их
-    подпапка data/<миссия>/ (чтобы реоформление не «переезжало» неожиданно)."""
-    target = str(project.mission_dir)
+    """Скачать/скопировать выбранные файлы миссии прямо в data/. Возвращает её путь."""
+    target = str(project.data_dir)
     if os.path.isdir(target):
         shutil.rmtree(target)
     for role_key, cand in project.files.items():
@@ -219,7 +209,7 @@ def make_snapshot(project: Project):
     прямо в snapshot/ (без подпапки по имени миссии)."""
     if os.path.isdir(project.snapshot_dir):
         shutil.rmtree(project.snapshot_dir)
-    shutil.copytree(str(project.mission_dir), str(project.snapshot_dir))
+    shutil.copytree(str(project.data_dir), str(project.snapshot_dir))
 
 
 def delete_snapshot(project: Project):
@@ -240,12 +230,5 @@ def load_snapshot_from(project: Project, provider: DataProvider, mission_rel: st
 
 
 def snapshot_mission_dir(project: Project) -> str | None:
-    """Папка снапшота для чтения ядром. Плоский снапшот — сам snapshot/; старый (с подпапкой
-    по имени миссии) — эта подпапка."""
-    if not project.has_snapshot():
-        return None
-    if (project.snapshot_dir / "areaflags.map").exists():
-        return str(project.snapshot_dir)
-    subs = [d for d in os.listdir(project.snapshot_dir)
-            if os.path.isdir(os.path.join(project.snapshot_dir, d))]
-    return os.path.join(str(project.snapshot_dir), subs[0]) if subs else None
+    """Папка снапшота для чтения ядром — сама snapshot/ (плоская раскладка)."""
+    return str(project.snapshot_dir) if project.has_snapshot() else None

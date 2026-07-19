@@ -36,8 +36,8 @@ def _world_size_from_areaflags(path: str) -> int | None:
 
 
 def _make_mission(path: str, name: str = "") -> Mission:
-    """Mission из папки. `name` (если задан, напр. из config проекта) переопределяет имя,
-    выведенное из папки — нужно для плоской раскладки, где папка называется 'data'."""
+    """Mission из папки data/. `name` (из config проекта) задаёт имя миссии и мир —
+    в плоской раскладке сама папка называется 'data', имя миссии хранится в config."""
     label = os.path.basename((name or path).rstrip("/\\")) or "mission"
     world = label.rsplit(".", 1)[-1].lower() if "." in label else label.lower()
     size = _world_size_from_areaflags(path) or 15360
@@ -48,26 +48,12 @@ def _make_mission(path: str, name: str = "") -> Mission:
 
 
 def scan_workdir(root: str, mission_name: str = "") -> list[Mission]:
-    """Ищет карты. Плоская раскладка проекта: файлы миссии прямо в <root>/data — тогда имя
-    миссии берём из `mission_name` (config). Иначе (старая раскладка/сервер): <root>/data/*,
-    затем <root>/*, затем сам root."""
+    """Миссия проекта лежит плоско в <root>/data; имя миссии — из config (`mission_name`).
+    Вложенная раскладка `data/<миссия>/` и mission-в-корне больше НЕ поддерживаются."""
     data = os.path.join(root, "data")
-    if _looks_like_mission(data):                # плоская раскладка проекта
+    if _looks_like_mission(data):
         return [_make_mission(data, name=mission_name)]
-    found: list[Mission] = []
-    if os.path.isdir(data):
-        for d in sorted(os.listdir(data)):
-            p = os.path.join(data, d)
-            if os.path.isdir(p) and _looks_like_mission(p):
-                found.append(_make_mission(p))
-    if not found and os.path.isdir(root):
-        for d in sorted(os.listdir(root)):
-            p = os.path.join(root, d)
-            if os.path.isdir(p) and _looks_like_mission(p):
-                found.append(_make_mission(p))
-    if not found and _looks_like_mission(root):
-        found.append(_make_mission(root))
-    return found
+    return []
 
 
 class Settings:
