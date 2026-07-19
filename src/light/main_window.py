@@ -146,11 +146,19 @@ class LightMainWindow(MainWindow):
 
         self.button_reload = QToolButton()
         self.button_reload.setText("Перезагрузить проект")
-        self.button_reload.setToolTip("Перечитать файлы проекта из источника (сбросит "
-                                   "несохранённые правки)")
+        self.button_reload.setToolTip("Перечитать проект с диска (последнее сохранение); "
+                                   "сбросит несохранённые правки")
         self.button_reload.clicked.connect(self.reload_project)
         self.button_reload.setEnabled(False)
         main_toolbar.insertWidget(first, self.button_reload)
+
+        self.button_snapshot = QToolButton()
+        self.button_snapshot.setText("Откат к снапшоту")
+        self.button_snapshot.setToolTip("Вернуть проект к снапшоту (исходному состоянию при "
+                                     "создании); потеряются все правки, включая сохранённые")
+        self.button_snapshot.clicked.connect(self.revert_to_snapshot)
+        self.button_snapshot.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_snapshot)
         main_toolbar.insertSeparator(first)
 
         self.button_bi_export = QToolButton()
@@ -203,32 +211,43 @@ class LightMainWindow(MainWindow):
         self.apply_gating()
         self.button_bi_export.setEnabled(True)
         self.button_reload.setEnabled(True)
+        self.button_snapshot.setEnabled(self.project.has_snapshot())
         self.button_save.setEnabled(True)        # карта загружена
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
         return True
 
     def reload_project(self):
-        """Перечитать файлы проекта из источника (потеряет несохранённые правки)."""
+        """Перечитать локальные файлы проекта (последнее сохранение на диске); сбрасывает
+        несохранённые правки. Данные из источника заново НЕ тянем."""
         if not self.project:
             return
-        from PySide6.QtWidgets import QMessageBox
         if self._dirty_cells:
             ok = QMessageBox.question(
                 self, "Перезагрузить",
                 f"Несохранённых правок: {self._dirty_cells} ячеек. Перечитать проект "
-                f"из источника и потерять их?")
+                f"с диска (последнее сохранение) и потерять их?")
             if ok != QMessageBox.StandardButton.Yes:
                 return
+        self.open_project(self.project)          # перечитывает data/ проекта
+
+    def revert_to_snapshot(self):
+        """Откат к снапшоту: восстановить исходное состояние проекта (каким оно было при
+        создании) из snapshot/ и перечитать. Теряются ВСЕ правки, включая сохранённые."""
+        if not self.project:
+            return
+        if not self.project.has_snapshot():
+            QMessageBox.information(self, "Снапшот", "У проекта нет снапшота.")
+            return
+        ok = QMessageBox.question(
+            self, "Откат к снапшоту",
+            "Вернуть проект к снапшоту (исходному состоянию при создании)? "
+            "Все правки, включая сохранённые на диск, будут потеряны.")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
         try:
-            if self.project.provider_cfg.get("kind") == "bi":
-                from light import bi_import          # BI: переимпорт из папки CE Tool
-                bi_import.rematerialize(self.project)
-            else:
-                from light.providers import make_provider
-                provider = make_provider(self.project.provider_cfg)
-                P.materialize(self.project, provider)
+            P.restore_snapshot(self.project)     # snapshot/ -> data/
         except Exception as e:
-            QMessageBox.warning(self, "Перезагрузка", f"Не удалось: {e}")
+            QMessageBox.warning(self, "Откат к снапшоту", f"Не удалось: {e}")
             return
         self.open_project(self.project)
 

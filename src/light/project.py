@@ -212,6 +212,15 @@ def make_snapshot(project: Project):
     shutil.copytree(str(project.data_dir), str(project.snapshot_dir))
 
 
+def restore_snapshot(project: Project):
+    """Откат: восстановить data/ из snapshot/ (исходное состояние при создании проекта)."""
+    if not project.has_snapshot():
+        raise FileNotFoundError("у проекта нет снапшота")
+    if os.path.isdir(project.data_dir):
+        shutil.rmtree(project.data_dir)
+    shutil.copytree(str(project.snapshot_dir), str(project.data_dir))
+
+
 def delete_snapshot(project: Project):
     if os.path.isdir(project.snapshot_dir):
         shutil.rmtree(project.snapshot_dir)
