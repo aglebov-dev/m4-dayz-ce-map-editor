@@ -24,6 +24,8 @@ class FootprintsItem(QGraphicsItem):
         self._margin = margin
         self._color = QColor(*color)
         self._idx = indices
+        self._fill_op = 1.0                       # прозрачность заливки (0..1)
+        self._border_op = 1.0                     # прозрачность контура (0..1) — раздельно
         self._selected: int | None = None        # локальный индекс в наборе
         # мир (X-восток, Z-север) -> сцена (север сверху): sy инвертирует Z
         sx = margin + corners[:, :, 0]
@@ -45,6 +47,14 @@ class FootprintsItem(QGraphicsItem):
         self._color = QColor(*color)
         self.update()
 
+    def set_fill_opacity(self, v: float):
+        self._fill_op = v
+        self.update()
+
+    def set_border_opacity(self, v: float):
+        self._border_op = v
+        self.update()
+
     def set_selected(self, index: int | None):
         self._selected = index
         self.update()
@@ -54,9 +64,13 @@ class FootprintsItem(QGraphicsItem):
         return QRectF(0, 0, s, s)
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, _widget=None):
+        # заливка и контур — с раздельной прозрачностью: контур можно оставить чётким,
+        # а заливку убрать (fill_op=0) для «только рамки»
         fill = QColor(self._color)
-        fill.setAlpha(200)                       # общая прозрачность — через setOpacity слоя
-        edge = QPen(QColor(self._color), 1)
+        fill.setAlpha(int(200 * self._fill_op))
+        edge_color = QColor(self._color)
+        edge_color.setAlpha(int(255 * self._border_op))
+        edge = QPen(edge_color, 1)
         edge.setCosmetic(True)                   # 1 px на экране при любом зуме
         painter.setBrush(fill)
         painter.setPen(edge)

@@ -79,7 +79,8 @@ class MapView(QGraphicsView):
         self._bld_selected: int | None = None    # глобальный индекс выделенного
         # слои контуров зданий (footprint): key -> {"corners","idx","color","item","visible"}
         self._fp_layers: dict[str, dict] = {}
-        self._fp_opacity = 1.0
+        self._fp_fill_opacity = 1.0              # прозрачность заливки контуров
+        self._fp_border_opacity = 1.0            # прозрачность обводки (раздельно)
         self._fp_selected: int | None = None
         # подписи зон выбранного слоя: сами данные + состояние тогла
         self._zone_labels: ZoneLabelsItem | None = None
@@ -612,11 +613,18 @@ class MapView(QGraphicsView):
             fp["item"].set_color(color)
 
     def set_footprints_opacity(self, v: float):
-        """Общая прозрачность всех слоёв контуров (слайдер секции «Здания»)."""
-        self._fp_opacity = v
+        """Прозрачность ЗАЛИВКИ всех слоёв контуров (слайдер «заливка» секции «Здания»)."""
+        self._fp_fill_opacity = v
         for fp in self._fp_layers.values():
             if fp["item"]:
-                fp["item"].setOpacity(v)
+                fp["item"].set_fill_opacity(v)
+
+    def set_footprints_border_opacity(self, v: float):
+        """Прозрачность ОБВОДКИ контуров (отдельный слайдер): чёткие рамки без заливки."""
+        self._fp_border_opacity = v
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].set_border_opacity(v)
 
     def set_selected_footprint(self, index: int | None):
         """Подсветить здание во всех слоях контуров (глобальный индекс инстанса)."""
@@ -634,7 +642,8 @@ class MapView(QGraphicsView):
                               indices=fp["idx"])
         item.setZValue(31)                       # над точками зданий (30), под подписями зон (40)
         item.setVisible(fp["visible"])
-        item.setOpacity(self._fp_opacity)
+        item.set_fill_opacity(self._fp_fill_opacity)
+        item.set_border_opacity(self._fp_border_opacity)
         item.set_selected(item.local_of(self._fp_selected))
         self.scene().addItem(item)
         fp["item"] = item

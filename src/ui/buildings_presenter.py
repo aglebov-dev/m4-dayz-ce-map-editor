@@ -89,11 +89,15 @@ class BuildingsPresenter(QObject):
             self._view.set_footprints(key, corners, self._colors.color(key),
                                       indices=selection[kept])
             self._view.set_footprints_opacity(self.panel.opacity("obj:"))
+            self._view.set_footprints_border_opacity(self.panel.border_opacity())
             self._built.add(key)
         self._view.set_footprints_visible(key, visible)
 
-    def _on_opacity(self, _prefix: str, value: int) -> None:
-        self._view.set_footprints_opacity(value / 100.0)
+    def _on_opacity(self, prefix: str, value: int) -> None:
+        if prefix == "objborder:":               # отдельный слайдер прозрачности контура
+            self._view.set_footprints_border_opacity(value / 100.0)
+        else:
+            self._view.set_footprints_opacity(value / 100.0)
 
     def select_building(self, index: int | None) -> None:
         """Подсветить выбранное здание (общий клик по карте — из главного окна)."""

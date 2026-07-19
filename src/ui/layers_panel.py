@@ -275,10 +275,32 @@ class ObjectsLayersPanel(LayersPanel):
 
 class BuildingsLayersPanel(ObjectsLayersPanel):
     """Слои контуров зданий (footprint). Те же `obj:`-ключи и цвета, что у «Объектов»
-    (маркеры совпадают), но свой заголовок и свой слайдер прозрачности."""
+    (маркеры совпадают), но свой заголовок и ДВА слайдера прозрачности: заливка (`obj:`)
+    и контур (`objborder:`) — раздельно, чтобы можно было убрать заливку и оставить рамки."""
 
     _header_key = "layers.buildings"
     _opacity_tip_key = "layers.bld_opacity_tip"
+
+    def _init_sliders(self):
+        self.sld_obj = self._make_slider("obj:", 100, tr(self._opacity_tip_key))
+        self.sld_border = self._make_slider("objborder:", 100,
+                                            tr("layers.bld_border_opacity_tip"))
+
+    def border_opacity(self) -> float:
+        return self.sld_border.value() / 100.0
+
+    def populate(self, objects: list[tuple[str, str, tuple[int, int, int], int]]):
+        self.clear()
+        if objects:
+            self._add_header(tr(self._header_key), "obj:")
+            # подписи-транзиенты (пересоздаются при populate); сами слайдеры — постоянные
+            self._list_lay.addWidget(QLabel(tr("layers.bld_fill")))
+            self._list_lay.addWidget(self.sld_obj)
+            self._list_lay.addWidget(QLabel(tr("layers.bld_border")))
+            self._list_lay.addWidget(self.sld_border)
+            for key, name, color, count in objects:
+                self._add_row(key, name, color, count)
+        self._list_lay.addStretch(1)
 
 
 class TerritoriesPanel(LayersPanel):
