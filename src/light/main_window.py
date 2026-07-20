@@ -6,15 +6,19 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButton
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QDesktopServices, QIcon
 
+from core.building_index import load_index
+from core.i18n import tr
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
 )
+from core.paths import paths
 from light import project as P
-from light.config_dialog import ProjectConfigDialog
 from light.gating import missing_for, tool_ok
+from ui.diag import trace, log as _diag
 from ui.main_window import MainWindow
 
 # какие доки принадлежат какому инструменту (objectName -> tool).
@@ -23,7 +27,7 @@ DOCK_TOOL = {
     "dock_layers": "map", "dock_inspector": "map", "dock_brush": "map",
     "dock_zones": "map", "dock_stats": "map",
     "dock_diff": "map", "dock_ce": "map",
-    "dock_obj_layers": "objects", "dock_objects": "objects",
+    "dock_buildings": "objects", "dock_objects": "objects",   # слои зданий + инспектор
     "dock_items": "economy", "dock_loot": "economy",
     # территории убраны из лёгкого редактора: env/*.xml не материализуются (панель пуста)
 }
@@ -34,13 +38,14 @@ class LightMainWindow(MainWindow):
         super().__init__()
         self.project: P.Project | None = None
         self.setWindowTitle("m4 dayz ce map editor")
-        
-        # Устанавливаем иконку для окна
+
+        # Иконка окна — из app_icon_high.ico
         icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "app_icon_high.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        
+
         self.setMinimumSize(640, 400)            # лёгкое окно свободно сжимается
+        self.diff_panel.snapshot_requested.connect(self.diff_with_snapshot)  # дифф со снапшотом
         self._add_project_buttons()
         self._map_dock_buttons()
         self._light_layout_setup()
@@ -76,17 +81,37 @@ class LightMainWindow(MainWindow):
         # 4) убрать лишние элементы тулбара: миссия задаётся проектом, подложка —
         #    при загрузке проекта. Прячем «Каталог», «Карта:»+комбобокс, «Background…».
         from PySide6.QtWidgets import QLabel, QWidgetAction
-        main_tb = [t for t in self.findChildren(type(self.tb_tools))
+        main_toolbar = [t for t in self.findChildren(type(self.tb_tools))
                    if t.windowTitle() != "tools"][0]
         drop = {self.btn_workdir, self.cmb_mission, self.btn_background}
-        for act in main_tb.actions():
+        for act in main_toolbar.actions():
             if isinstance(act, QWidgetAction):
                 wdt = act.defaultWidget()
                 if wdt in drop or isinstance(wdt, QLabel):   # QLabel тут только «Карта:»
                     act.setVisible(False)
 
+    @trace
     def _cap_floating(self, dock):
-        """Отцепили панель — высота не больше половины экрана."""
+        """Отцепили панель — высота не больше половины экрана. resize ОТКЛАДЫВАЕМ на
+        следующий тик: менять геометрию дока прямо внутри topLevelChanged (Qt ещё
+        перестраивает layout, мышь захвачена) — ре-энтрантность в раскладку доков и
+        нативный abort (qFatal). После тика док уже верхнеуровневое окно — resize безопасен."""
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda d=dock: self._cap_floating_now(d))
+
+    @trace
+    def _cap_floating_now(self, dock):
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt as _Qt, QTimer
+        if QApplication.mouseButtons() != _Qt.MouseButton.NoButton:
+            _diag("defer _cap_floating_now (drag in progress)")
+            QTimer.singleShot(60, lambda d=dock: self._cap_floating_now(d))
+            return                                # пока драг — не трогаем геометрию
+        try:
+            if not dock.isFloating():             # успели вернуть в док — ничего не делаем
+                return
+        except RuntimeError:
+            return                                # док уже разрушен
         scr = self.screen().availableGeometry() if self.screen() else None
         if not scr:
             return
@@ -124,43 +149,66 @@ class LightMainWindow(MainWindow):
         # первый тулбар (не «tools», где кнопки панелей)
         toolbars = [t for t in self.findChildren(type(self.tb_tools))
                     if t.windowTitle() != "tools"]
-        main_tb = toolbars[0]
-        first = main_tb.actions()[0]
+        main_toolbar = toolbars[0]
+        first = main_toolbar.actions()[0]
 
         # СОХРАНИТЬ — яркая заметная кнопка слева
-        self.btn_save = QToolButton()
-        self.btn_save.setText("save")
-        self.btn_save.setToolTip("write areaflags.map")
-        self.btn_save.clicked.connect(self.on_save)
-        self.btn_save.setStyleSheet(
+        self.button_save = QToolButton()
+        self.button_save.setText(tr("toolbar.save"))
+        self.button_save.setToolTip(tr("toolbar.save_tip"))
+        self.button_save.clicked.connect(self.on_save)
+        self.button_save.setStyleSheet(
             "QToolButton { background:#2e7d32; color:white; font-weight:bold;"
             " padding:3px 10px; border-radius:3px; }"
             "QToolButton:disabled { background:#c8c8c8; color:#888; }")
-        self.btn_save.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_save)
+        self.button_save.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_save)
 
-        self.btn_open = QToolButton()
-        self.btn_open.setText("Открыть проект…")
-        self.btn_open.setToolTip("Открыть/настроить проект (источник, файлы, снапшот)")
-        self.btn_open.clicked.connect(self.open_project_dialog)
-        main_tb.insertWidget(first, self.btn_open)
+        self.button_open = QToolButton()
+        self.button_open.setText(tr("toolbar.open_project"))
+        self.button_open.setToolTip(tr("toolbar.open_project_tip"))
+        self.button_open.clicked.connect(self.open_project_dialog)
+        main_toolbar.insertWidget(first, self.button_open)
 
-        self.btn_reload = QToolButton()
-        self.btn_reload.setText("Перезагрузить проект")
-        self.btn_reload.setToolTip("Перечитать файлы проекта из источника (сбросит "
-                                   "несохранённые правки)")
-        self.btn_reload.clicked.connect(self.reload_project)
-        self.btn_reload.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_reload)
-        main_tb.insertSeparator(first)
+        self.button_reload = QToolButton()
+        self.button_reload.setText(tr("toolbar.reload_project"))
+        self.button_reload.setToolTip(tr("toolbar.reload_project_tip"))
+        self.button_reload.clicked.connect(self.reload_project)
+        self.button_reload.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_reload)
 
-        self.btn_bi_export = QToolButton()
-        self.btn_bi_export.setText("Экспорт в BI…")
-        self.btn_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
-                                      "cfglimits + TGA-слои по флагам + проект XML")
-        self.btn_bi_export.clicked.connect(self.export_to_bi)
-        self.btn_bi_export.setEnabled(False)
-        main_tb.addWidget(self.btn_bi_export)
+        self.button_snapshot = QToolButton()
+        self.button_snapshot.setText(tr("toolbar.snapshot"))
+        self.button_snapshot.setToolTip(tr("toolbar.snapshot_tip"))
+        self.button_snapshot.clicked.connect(self.revert_to_snapshot)
+        self.button_snapshot.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_snapshot)
+        main_toolbar.insertSeparator(first)
+
+        # BI-экспорт — в общей группе с основными кнопками (а не у правого края)
+        self.button_bi_export = QToolButton()
+        self.button_bi_export.setText(tr("toolbar.bi_export"))
+        self.button_bi_export.setToolTip(tr("toolbar.bi_export_tip"))
+        self.button_bi_export.clicked.connect(self.export_to_bi)
+        self.button_bi_export.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_bi_export)
+
+        # ПАПКА — открыть в проводнике папку с файлами текущей карты
+        self.button_folder = QToolButton()
+        self.button_folder.setText(tr("toolbar.folder"))
+        self.button_folder.setToolTip(tr("toolbar.folder_tip"))
+        self.button_folder.clicked.connect(self.open_map_folder)
+        self.button_folder.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_folder)
+
+        # язык — сразу за BI (был у правого края за спейсером): всё идёт друг за другом
+        lang_action = next((a for a in main_toolbar.actions()
+                            if main_toolbar.widgetForAction(a) is self.cmb_lang), None)
+        if lang_action is not None:
+            main_toolbar.removeAction(lang_action)   # прячет виджет — вернём show() ниже
+        new_lang_action = main_toolbar.insertWidget(first, self.cmb_lang)
+        new_lang_action.setVisible(True)
+        self.cmb_lang.setVisible(True)               # removeAction скрыл — показываем явно
 
         # добавление/удаление флагов — в панели «Слои» (заголовки секций и строки)
         self.layers_panel.allow_add_flag = True
@@ -182,38 +230,122 @@ class LightMainWindow(MainWindow):
     # ---------- проект ----------
 
     def open_project_dialog(self):
-        dlg = ProjectConfigDialog(self, existing=self.project)
-        if dlg.exec() and dlg.result_project:
-            self.open_project(dlg.result_project)
+        # «Открыть проект» из редактора — то же приветственное окно, что и при старте
+        from light.welcome_window import WelcomeWindow
+        welcome = WelcomeWindow(self)
+        if welcome.exec() and welcome.result_project:
+            self.open_project(welcome.result_project)
 
-    def open_project(self, proj: P.Project):
+    def open_project(self, proj: P.Project) -> bool:
+        """Открыть проект. True — карта загружена; False — карты нет / файл повреждён
+        (редактор показывать не нужно, сообщение уже показано)."""
+        self._save_project_layout()              # раскладку ТЕКУЩЕГО проекта — перед сменой
         self.project = proj
-        self.load_workdir(proj.workdir)          # ядро читает материализованную миссию
-        self.apply_gating()
-        self.btn_bi_export.setEnabled(True)
-        self.btn_reload.setEnabled(True)
-        has_map = self.areaflags is not None
-        self.btn_save.setEnabled(has_map)
+        # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/).
+        # silent: своё понятное сообщение покажем ниже, без «миссии не найдены».
+        self.load_workdir(proj.workdir, proj.mission_name, silent=True)
+        if self.areaflags is None:
+            QMessageBox.warning(
+                self, "Загрузка проекта",
+                f"Не удалось открыть «{proj.name}»: карта не найдена или файл повреждён.")
+            self.project = None
+            return False
+        self._restore_project_layout()           # раскладка панелей ЭТОГО проекта (если есть)
+        self.apply_gating()                      # гейтинг — после раскладки (последнее слово)
+        self.button_bi_export.setEnabled(True)
+        self.button_folder.setEnabled(True)
+        self.button_reload.setEnabled(True)
+        has_snapshot = self.project.has_snapshot()
+        self.button_snapshot.setEnabled(has_snapshot)
+        self.button_save.setEnabled(True)        # карта загружена
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
+        # Дифф: кнопка «Со снапшотом» + сразу подгружаем дифф со снапшотом (если он есть)
+        self.diff_panel.set_snapshot_available(has_snapshot)
+        if has_snapshot:
+            self.diff_with_snapshot(raise_dock=False)
+        return True
 
-    def reload_project(self):
-        """Перечитать файлы проекта из источника (потеряет несохранённые правки)."""
+    # ---------- раскладка панелей: своя для каждого проекта ----------
+
+    def _save_project_layout(self):
+        """Сохранить раскладку панелей текущего проекта (в его layout.json)."""
         if not self.project:
             return
-        from PySide6.QtWidgets import QMessageBox
+        try:
+            state = bytes(self.saveState().toBase64()).decode()
+            P.save_layout(self.project, state)
+        except Exception:
+            pass
+
+    def _restore_project_layout(self):
+        """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков)."""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        state = P.load_layout(self.project) if self.project else None
+        if not state:
+            return                               # нет своей раскладки — оставляем как есть
+        from PySide6.QtCore import QByteArray
+        try:
+            self.restoreState(QByteArray.fromBase64(state.encode()))
+        except Exception:
+            pass
+
+    def closeEvent(self, ev):
+        self._save_project_layout()              # раскладку проекта — при выходе
+        super().closeEvent(ev)                   # подтверждение правок + глобальная раскладка
+
+    def diff_with_snapshot(self, raise_dock: bool = True):
+        """Сравнить текущую карту со снапшотом проекта (исходным состоянием при создании)."""
+        if not self.project or not self.project.has_snapshot():
+            self.diff_panel.show_error("У проекта нет снапшота")
+            return
+        snapshot_dir = P.snapshot_mission_dir(self.project)
+        if not snapshot_dir:
+            self.diff_panel.show_error("Снапшот пуст")
+            return
+        self.load_diff(os.path.join(snapshot_dir, "areaflags.map"), raise_dock=raise_dock,
+                       source=tr("diff.src_snapshot"))
+
+    def reload_project(self):
+        """Перечитать локальные файлы проекта (последнее сохранение на диске); сбрасывает
+        несохранённые правки. Данные из источника заново НЕ тянем."""
+        if not self.project:
+            return
         if self._dirty_cells:
             ok = QMessageBox.question(
                 self, "Перезагрузить",
                 f"Несохранённых правок: {self._dirty_cells} ячеек. Перечитать проект "
-                f"из источника и потерять их?")
+                f"с диска (последнее сохранение) и потерять их?")
             if ok != QMessageBox.StandardButton.Yes:
                 return
-        from light.providers import make_provider
+        self.open_project(self.project)          # перечитывает data/ проекта
+
+    def open_map_folder(self):
+        """Открыть в проводнике папку с файлами текущей карты (data/ проекта)."""
+        if not self.project:
+            return
+        path = str(self.project.mission_dir)
+        if os.path.isdir(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def revert_to_snapshot(self):
+        """Откат к снапшоту: восстановить исходное состояние проекта (каким оно было при
+        создании) из snapshot/ и перечитать. Теряются ВСЕ правки, включая сохранённые."""
+        if not self.project:
+            return
+        if not self.project.has_snapshot():
+            QMessageBox.information(self, "Снапшот", "У проекта нет снапшота.")
+            return
+        ok = QMessageBox.question(
+            self, "Откат к снапшоту",
+            "Вернуть проект к снапшоту (исходному состоянию при создании)? "
+            "Все правки, включая сохранённые на диск, будут потеряны.")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
         try:
-            prov = make_provider(self.project.provider_cfg)
-            P.materialize(self.project, prov)
+            P.restore_snapshot(self.project)     # snapshot/ -> data/
         except Exception as e:
-            QMessageBox.warning(self, "Перезагрузка", f"Не удалось: {e}")
+            QMessageBox.warning(self, "Откат к снапшоту", f"Не удалось: {e}")
             return
         self.open_project(self.project)
 
@@ -225,6 +357,10 @@ class LightMainWindow(MainWindow):
         from light import tiles_store
         proj = getattr(self, "project", None)    # super().__init__ может звать до нас
         bg = proj.background if proj else ""
+        # датасет зданий грузим вместе с подложкой; каноничный мир — из background
+        # (m.world у миссии-в-корне = имя папки, для датасета не годится, как и для тайлов)
+        canon_world = bg.split(":", 1)[1] if bg.startswith("tiles") and ":" in bg else m.world
+        self.building_index = load_index(paths.buildings_roots(), canon_world)
         if bg.startswith("tiles"):
             world = bg.split(":", 1)[1] if ":" in bg else m.world
             meta = tiles_store.find(world)
@@ -300,15 +436,10 @@ class LightMainWindow(MainWindow):
         """Перестроить панель слоёв и список кисти под текущие usage/value (после
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
-        counts_tier = [int(np.count_nonzero(af.tier & (1 << b)))
-                       for b in range(len(af.values))]
-        counts_usage = [int(np.count_nonzero(af.usage & np.uint32(1 << b)))
-                        for b in range(len(af.usages))]
-        colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
-        colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
-        self.layers_panel.populate(af, counts_tier, counts_usage, colors, tiers_on=False)
-        self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
-                                  + [(f"usage:{n}", n) for n in af.usages])
+        self.layers.populate(af, tiers_on=False)     # презентер сам считает counts и цвета
+        self.brush_panel.populate(
+            [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
 
     def apply_gating(self):
         """Блокировать инструменты, чьих файлов нет; подсказать, каких именно."""

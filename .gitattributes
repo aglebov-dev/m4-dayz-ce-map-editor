@@ -1,0 +1,18 @@
+# Нормализация переводов строк: текст хранится в git с LF, в рабочей копии — как принято
+# в системе. Всё, что бинарное, git не трогает — иначе байты портятся (см. areaflags.map).
+* text=auto
+
+*.py       text diff=python
+*.md       text
+*.json     text
+*.yml      text
+*.spec     text eol=crlf
+*.bat      text eol=crlf
+*.ps1      text eol=crlf
+
+*.map      binary
+*.png      binary
+*.jpg      binary
+*.ico      binary
+*.exe      binary
+*.zip      binary

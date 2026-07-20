@@ -30,21 +30,31 @@ class FileChangedError(WriteError):
 def pack(af: AreaFlags) -> np.ndarray:
     """AreaFlags -> байты чистого v1. Проверяет, что данные вообще представимы."""
     cells = af.cells
-    nibble = len(af.values) <= 4
     if af.usage.size != cells or af.tier.size != cells:
         raise WriteError(f"размер данных не сходится с сеткой {af.grid_x}×{af.grid_y}")
-    if nibble and int(af.tier.max(initial=0)) > 0x0F:
-        raise WriteError("value-маска не влезает в ниббл (>4 бит) — файл был бы битым")
+    # ширины возвращаем те же, что были на диске: они заданы заголовком и числом флагов,
+    # а не нашими типами в памяти (usage там uint32, даже когда файл 16-битный)
+    limit = (1 << af.tier_bits) - 1
+    if int(af.tier.max(initial=0)) > limit:
+        raise WriteError(f"value-маска не влезает в {af.tier_bits} бит — файл был бы битым")
+    if int(af.usage.max(initial=0)) > (1 << (af.usage_bytes * 8)) - 1:
+        raise WriteError(f"usage-маска не влезает в {af.usage_bytes * 8} бит")
     header = af.header
     if header is None or header.size != 24:
         raise WriteError("нет исходного заголовка (24 байта)")
-    b = _pack_nibbles(af.tier) if nibble else af.tier.astype(np.uint8)
+    if af.tier_bits == 4:
+        b = _pack_nibbles(af.tier)
+    elif af.tier_bits == 8:
+        b = af.tier.astype(np.uint8)
+    else:
+        b = np.frombuffer(af.tier.astype("<u2").tobytes(), dtype=np.uint8)
+    usage_dtype = "<u4" if af.usage_bytes == 4 else "<u2"
     out = np.concatenate([
         header.astype(np.uint8),
-        np.frombuffer(af.usage.astype("<u4").tobytes(), dtype=np.uint8),
+        np.frombuffer(af.usage.astype(usage_dtype).tobytes(), dtype=np.uint8),
         b,
     ])
-    expected = 24 + cells * 4 + (cells // 2 if nibble else cells)
+    expected = 24 + cells * af.usage_bytes + cells * af.tier_bits // 8
     if out.size != expected:
         raise WriteError(f"собрано {out.size:,} байт вместо {expected:,}")
     return out

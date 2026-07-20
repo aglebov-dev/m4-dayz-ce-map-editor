@@ -235,15 +235,21 @@ def decode_paa(data: bytes) -> np.ndarray:
 # ---------- склейка + пирамида ----------
 
 def _detect_overlap(left: np.ndarray, right: np.ndarray) -> int:
-    """Перекрытие соседних тайлов: правый край левого ≈ левый край правого."""
+    """Перекрытие соседних тайлов: правый край левого ≈ левый край правого.
+
+    Перебираем до половины тайла: у ванильных карт перекрытие мелкое, у модовых бывает
+    крупное (DeerIsle — 128 px при тайле 512). Слишком короткий перебор возвращает 0, и
+    тайлы кладутся с шагом во всю ширину — по карте идёт двоение на каждом стыке.
+    При равном совпадении берём ШИРОКОЕ: на однородной воде совпадает любая ширина, а
+    настоящее перекрытие даёт нулевую разницу и на текстуре."""
     h, w, _ = left.shape
     best, best_diff = 0, 1e18
     li = left.astype(np.int32); ri = right.astype(np.int32)
-    for cand in range(1, 65):
+    for cand in range(1, w // 2 + 1):
         l = li[::7, w - cand:w, :3]
         r = ri[::7, 0:cand, :3]
         diff = np.abs(l - r).sum() / (l.size or 1)
-        if diff < best_diff:
+        if diff <= best_diff:
             best_diff, best = diff, cand
     return best if best_diff < 8 else 0
 
@@ -276,19 +282,32 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
         px, py = x * step, y * step
         full[py:py + rgb.shape[0], px:px + rgb.shape[1]] = rgb[:, :, :3]
 
-    # НОРМАЛИЗАЦИЯ к 1 px/м: у некоторых миров спутник не 1 px/м (Enoch — 1.2),
-    # а редактор/TileMeta считают 1 px/м. Ужимаем полотно так, чтобы worldSize метров
-    # занимал (final - overlap_m) пикселей при 1 px/м — тогда подложка и оверлей флагов
-    # совпадают на любом мире.
-    ppm = (full_size - overlap) / world_size
+    # НОРМАЛИЗАЦИЯ к 1 px/м: редактор и TileMeta считают подложку в 1 px/м, а спутник
+    # бывает и плотнее. Разрешение берём как отношение полотна к миру, округляя до
+    # «круглого» значения: поле вокруг мира — это единицы процентов, оно не должно
+    # утаскивать масштаб. Выводить масштаб из перекрытия НЕЛЬЗЯ: `полотно - перекрытие`
+    # равно миру только там, где поле равно перекрытию (ваниль). У DeerIsle поле 128 px
+    # при перекрытии 128, и такая формула давала 1.008 px/м — картинку ужимало на 0.8%,
+    # то есть на юго-востоке карты здания уезжали на сотню метров.
+    ppm_raw = full_size / world_size
+    ppm = min((0.25, 0.5, 1.0, 2.0, 4.0), key=lambda c: abs(c - ppm_raw))
     img = Image.fromarray(full)
     if abs(ppm - 1.0) > 1e-3:
-        overlap_m = overlap / ppm                 # физическое перекрытие в метрах
-        final = int(round(world_size + overlap_m))
+        final = int(round(full_size / ppm))
         img = img.resize((final, final))
         full_size = final
-        overlap = overlap_m
-        log(f"нормализация 1 px/м: {ppm:.3f} px/м → полотно {final}×{final}")
+        overlap = overlap / ppm
+        log(f"нормализация 1 px/м: {ppm_raw:.3f} px/м → полотно {final}×{final}")
+    # Поле вокруг мира = половина перекрытия: спутник выходит за террейн на полтайла
+    # стыка с каждой стороны. Считать его как (полотно - мир)/2 нельзя — полотно кратно
+    # шагу тайла и с дальнего края торчит лишнее (DeerIsle: 43 тайла = 16640 px при мире
+    # 16384 + 128, то есть 192 px хвоста), от чего подложка съезжает на десятки метров.
+    margin = overlap / 2.0
+    tail = full_size - world_size - overlap          # хвост за дальним краем мира
+    if tail < -1:
+        log(f"внимание: полотно {full_size} меньше мира {world_size:.0f} м с полем")
+    elif tail > 1:
+        log(f"полотно шире мира на {tail:.0f} px — хвост сетки тайлов за дальним краем")
 
     os.makedirs(out_dir, exist_ok=True)
     out_tile = 256
@@ -320,7 +339,7 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
         "name": world_name or os.path.basename(out_dir),
         "tileSize": out_tile, "maxZoom": max_zoom,
         "width": full_size, "height": full_size, "worldSize": world_size,
-        "margin": overlap / 2.0, "pixelsPerMeter": (full_size - overlap) / world_size,
+        "margin": margin, "pixelsPerMeter": 1.0,
     }
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
