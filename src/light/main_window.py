@@ -398,6 +398,14 @@ class LightMainWindow(MainWindow):
             QMessageBox.warning(self, "Флаг", str(e))
             return
         self._repopulate_layers()
+        if kind == "usage" and name.strip() in af.unwritable_usages():
+            # флаг в конфиг записан (движок его увидит), но бита в ячейке ему не досталось
+            QMessageBox.warning(
+                self, "Флаг",
+                f"Флаг «{name.strip()}» добавлен в cfglimitsdefinition.xml, но ячейка этой "
+                f"карты хранит только {af.usage_bits} бит usage — рисовать его нельзя.\n"
+                f"Нужна пересборка карты в CE Tool.")
+            return
         self.statusBar().showMessage(
             f"Добавлен {kind}-флаг «{name.strip()}» (пустой слой — рисуйте кистью)", 8000)
 
@@ -436,10 +444,12 @@ class LightMainWindow(MainWindow):
         """Перестроить панель слоёв и список кисти под текущие usage/value (после
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
+        blocked = set(af.unwritable_usages())        # шире ячейки — кисти не отдаём
         self.layers.populate(af, tiers_on=False)     # презентер сам считает counts и цвета
         self.brush_panel.populate(
             [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
-            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages
+             if n not in blocked])
 
     def apply_gating(self):
         """Блокировать инструменты, чьих файлов нет; подсказать, каких именно."""

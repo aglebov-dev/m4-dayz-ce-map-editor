@@ -622,15 +622,39 @@ class MainWindow(QMainWindow):
         self.layers.populate(af)                 # презентер сам считает counts и цвета
         self.buildings_feature.populate(af, model, self.building_index)   # слои + инспектор
         self._load_territories(m)
+        # флаги без бита в ячейке кисти не отдаём: нарисовать их можно, а сохранить нельзя,
+        # и упирается в это человек только при записи — уже нарисовав зону
+        blocked = set(af.unwritable_usages())
         self.brush_panel.populate(
             [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
-            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages
+             if n not in blocked])
         self.refresh_stats(now=True)             # карта загружена — сводка по всей карте
         if af.repaired_crlf:
             self.lbl_af.setText(tr("af.repaired", n=af.repaired_crlf))
             self.lbl_af.setStyleSheet("color: #2e7d32;")
         else:
             self.lbl_af.setText(tr("af.v1"))
+        self._warn_about_usage_layer(af)
+
+    def _warn_about_usage_layer(self, af) -> None:
+        """Сказать про особенности слоя usage сразу, а не при сохранении.
+
+        Два случая, оба встречались вживую: часть флагов шире ячейки (DeerIsle — 22 флага
+        при 16 битах, ванильный halloween.chernarusplus — 17) и слой usage пуст целиком
+        (карта из мода везёт заготовку, зоны рисует владелец сервера)."""
+        import numpy as np
+        from PySide6.QtWidgets import QMessageBox
+
+        lines = []
+        blocked = af.unwritable_usages()
+        if blocked:
+            lines.append(tr("af.usage_blocked", bits=af.usage_bits,
+                            names=", ".join(blocked)))
+        if not np.any(af.usage):
+            lines.append(tr("af.usage_empty"))
+        if lines:
+            QMessageBox.information(self, tr("af.usage_title"), "\n\n".join(lines))
 
     def layer_color(self, key: str) -> tuple[int, int, int]:
         """Совместимость: логика подбора вынесена в common.layer_colors.LayerColors."""

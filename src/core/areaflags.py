@@ -70,6 +70,20 @@ class AreaFlags:
         """Битмаска тиров -> uint8[grid_y, grid_x], row 0 = ЮГ."""
         return self.tier.reshape(self.grid_y, self.grid_x)
 
+    @property
+    def usage_bits(self) -> int:
+        """Сколько бит под usage в ячейке — столько флагов карта и способна хранить."""
+        return self.usage_bytes * 8
+
+    def unwritable_usages(self) -> list[str]:
+        """usage-флаги, которым в ячейке НЕТ бита.
+
+        Ширина ячейки фиксируется при генерации карты, а `cfglimitsdefinition.xml` живёт
+        своей жизнью — флагов там бывает больше (DeerIsle: 22 при 16 битах, ванильный
+        halloween.chernarusplus: 17 при 16). Такой флаг нельзя ни нарисовать, ни сохранить,
+        поэтому кисть его не предлагает."""
+        return self.usages[self.usage_bits:]
+
 
 def _dos2unix(raw: np.ndarray) -> np.ndarray:
     """Убирает 0x0D, стоящие непосредственно перед 0x0A (обратное к unix2dos).

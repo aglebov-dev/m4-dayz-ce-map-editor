@@ -37,8 +37,14 @@ def pack(af: AreaFlags) -> np.ndarray:
     limit = (1 << af.tier_bits) - 1
     if int(af.tier.max(initial=0)) > limit:
         raise WriteError(f"value-маска не влезает в {af.tier_bits} бит — файл был бы битым")
-    if int(af.usage.max(initial=0)) > (1 << (af.usage_bytes * 8)) - 1:
-        raise WriteError(f"usage-маска не влезает в {af.usage_bytes * 8} бит")
+    if int(af.usage.max(initial=0)) > (1 << af.usage_bits) - 1:
+        # называем виновников: «не влезает в 16 бит» не подсказывает, что стирать
+        over = [name for bit, name in enumerate(af.usages)
+                if bit >= af.usage_bits and np.any(af.usage & np.uint32(1 << bit))]
+        names = ", ".join(over) if over else f"биты выше {af.usage_bits - 1}"
+        raise WriteError(
+            f"эти usage-флаги нельзя записать в карту с {af.usage_bits}-битной ячейкой: "
+            f"{names}. Сотрите их — остальная правка сохранится")
     header = af.header
     if header is None or header.size != 24:
         raise WriteError("нет исходного заголовка (24 байта)")
