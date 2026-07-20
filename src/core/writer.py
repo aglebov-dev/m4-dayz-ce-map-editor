@@ -58,7 +58,7 @@ def save_areaflags(af: AreaFlags, path: str = "", backup: bool = True,
     path = path or af.source_path
     if not path:
         raise WriteError("не задан путь к areaflags.map")
-    data = pack(af)                              # соберём ДО того, как трогать диск
+    data = pack(af)
 
     if os.path.exists(path) and not force and af.source_mtime:
         if os.path.getmtime(path) != af.source_mtime:
@@ -69,18 +69,17 @@ def save_areaflags(af: AreaFlags, path: str = "", backup: bool = True,
     backup_path = ""
     if backup and os.path.exists(path):
         backup_path = _free_backup_path(path)
-        _copy(path, backup_path)                 # копия, не перенос: оригинал на месте
-                                                 # до самой замены
+        _copy(path, backup_path)
 
     tmp = f"{path}.tmp"
     try:
         data.tofile(tmp)
-        os.replace(tmp, path)                    # атомарно: движок не увидит огрызок
+        os.replace(tmp, path)
     except Exception as e:
         _cleanup(tmp)
         raise WriteError(f"не удалось записать файл: {e}") from e
 
-    if verify:                                   # перечитать и сверить с памятью
+    if verify:
         try:
             back = read_areaflags(os.path.dirname(path))
             ok = (back.repaired_crlf == 0
@@ -93,7 +92,7 @@ def save_areaflags(af: AreaFlags, path: str = "", backup: bool = True,
         else:
             err = None
         if not ok:
-            if backup_path:                      # вернуть как было — файл рабочий
+            if backup_path:
                 _copy(backup_path, path)
             raise WriteError(
                 f"проверка после записи не сошлась{f': {err}' if err else ''}"
@@ -102,7 +101,7 @@ def save_areaflags(af: AreaFlags, path: str = "", backup: bool = True,
     af.source_path = path
     af.source_mtime = os.path.getmtime(path)
     crlf_removed = af.repaired_crlf
-    af.repaired_crlf = 0                         # на диске теперь чистый v1
+    af.repaired_crlf = 0
     return {"path": path, "backup": backup_path, "bytes": int(data.size),
             "crlf_removed": crlf_removed}
 

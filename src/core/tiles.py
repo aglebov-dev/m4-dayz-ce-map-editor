@@ -9,13 +9,13 @@ from dataclasses import dataclass
 
 @dataclass
 class TileMeta:
-    root: str            # папка мира с уровнями зума
+    root: str
     tile_size: int
     max_zoom: int
-    width: int           # пиксели полного зума (worldSize + 2*margin)
+    width: int
     height: int
-    world_size: int      # метры
-    margin: int          # пиксели поля вокруг мира
+    world_size: int
+    margin: int
 
     def scale_at(self, zoom: int) -> float:
         """Во сколько раз уровень zoom мельче полного (2^(max_zoom - zoom))."""
@@ -33,7 +33,7 @@ class TileMeta:
 
     def grid_size(self, zoom: int) -> tuple[int, int]:
         """Число колонок/строк тайлов на уровне (последние могут быть неполными)."""
-        span = self.tile_size * self.scale_at(zoom)   # scene px на тайл
+        span = self.tile_size * self.scale_at(zoom)
         return math.ceil(self.width / span), math.ceil(self.height / span)
 
     def zoom_for_scale(self, view_scale: float) -> int:

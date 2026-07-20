@@ -1,0 +1,116 @@
+"""Источник «Через SFTP» — папка сервера DayZ на удалённой машине.
+
+Недоступен без paramiko — тогда `availability()` вернёт причину, и приветственное окно
+покажет вкладку заблокированной. Подключение → SftpProvider, дальше общий `ConfigurePanel`."""
+from __future__ import annotations
+
+from PySide6.QtWidgets import (
+    QFormLayout, QLineEdit, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+)
+
+from core.i18n import tr
+from light import app_prefs
+from light.configure_panel import ConfigurePanel
+from light.providers import ProviderError, SftpProvider, sftp_available
+from light.sources.base import Availability, ProjectSource
+
+_PREFS_KEY = "sftp_form"
+
+
+class SftpProjectSource(ProjectSource):
+    id = "sftp"
+    title = "src.sftp"
+
+    def availability(self) -> Availability:
+        if sftp_available():
+            return Availability.available()
+        return Availability.unavailable(tr("src.sftp_no_paramiko"))
+
+    def build_widget(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        form = QFormLayout()
+        self.host_edit = QLineEdit()
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1, 65535)
+        self.port_spin.setValue(22)
+        self.user_edit = QLineEdit()
+        self.password_edit = QLineEdit()
+        self.password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.key_edit = QLineEdit()
+        self.root_edit = QLineEdit()
+        self.root_edit.setText("/")
+        form.addRow(tr("src.sftp_host"), self.host_edit)
+        form.addRow(tr("src.sftp_port"), self.port_spin)
+        form.addRow(tr("src.sftp_user"), self.user_edit)
+        form.addRow(tr("src.sftp_password"), self.password_edit)
+        form.addRow(tr("src.sftp_key"), self.key_edit)
+        form.addRow(tr("src.sftp_root"), self.root_edit)
+        layout.addLayout(form)
+
+        self.connect_button = QPushButton(tr("src.connect"))
+        self.connect_button.clicked.connect(self._connect)
+        layout.addWidget(self.connect_button)
+
+        self.panel = ConfigurePanel()
+        self.panel.ready_changed.connect(self._on_ready)
+        layout.addWidget(self.panel, 1)
+
+        self.create_button = QPushButton(tr("src.load_project"))
+        self.create_button.setEnabled(False)
+        self.create_button.clicked.connect(self._create)
+        layout.addWidget(self.create_button)
+
+        self._load_prefs()
+        return widget
+
+    def _load_prefs(self) -> None:
+        saved = app_prefs.get(_PREFS_KEY) or {}
+        self.host_edit.setText(saved.get("host", ""))
+        self.port_spin.setValue(int(saved.get("port", 22) or 22))
+        self.user_edit.setText(saved.get("user", ""))
+        self.key_edit.setText(saved.get("key_path", "") or "")
+        self.root_edit.setText(saved.get("root", "/") or "/")
+
+    def _save_prefs(self) -> None:
+        app_prefs.set(_PREFS_KEY, {
+            "host": self.host_edit.text().strip(),
+            "port": self.port_spin.value(),
+            "user": self.user_edit.text().strip(),
+            "key_path": self.key_edit.text().strip(),
+            "root": self.root_edit.text().strip() or "/",
+        })
+
+    def _provider_cfg(self) -> dict:
+        return {
+            "kind": "sftp",
+            "host": self.host_edit.text().strip(),
+            "port": self.port_spin.value(),
+            "user": self.user_edit.text().strip(),
+            "password": self.password_edit.text() or None,
+            "key_path": self.key_edit.text().strip() or None,
+            "root": self.root_edit.text().strip() or "/",
+        }
+
+    def _connect(self) -> None:
+        self._save_prefs()
+        config = self._provider_cfg()
+        try:
+            provider = SftpProvider(
+                config["host"], config["user"], config["root"],
+                port=int(config["port"]), password=config["password"],
+                key_path=config["key_path"])
+        except (ProviderError, KeyError, OSError) as error:
+            QMessageBox.warning(self.panel, "SFTP", tr("src.source_err", error=error))
+            self.panel.clear()
+            return
+        self.panel.set_provider(provider, config)
+
+    def _on_ready(self, ready: bool) -> None:
+        self.create_button.setEnabled(ready)
+
+    def _create(self) -> None:
+        project = self.panel.build_project()
+        if project is not None:
+            self.emit_project(project)

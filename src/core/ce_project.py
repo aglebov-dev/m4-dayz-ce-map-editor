@@ -21,8 +21,8 @@ import numpy as np
 @dataclass
 class ProjectLayer:
     name: str
-    usage_mask: int          # маска usage-флагов (0 — не usage-слой)
-    value_mask: int          # маска value-флагов
+    usage_mask: int
+    value_mask: int
     color: tuple[int, int, int]
     visible: bool
 
@@ -33,9 +33,9 @@ class ProjectLayer:
 
 @dataclass
 class CeProject:
-    path: str                # папка проекта
-    layer_size: int          # сторона сетки (4096)
-    world_size: int          # метры
+    path: str
+    layer_size: int
+    world_size: int
     background: str
     usages: list[str]
     values: list[str]
@@ -100,17 +100,17 @@ def read_tga_gray(path: str) -> np.ndarray:
     if bpp != 8:
         raise ValueError(f"ожидался 8bpp TGA, получен {bpp}")
     p = 18 + id_len
-    if img_type == 3:                            # без сжатия
+    if img_type == 3:
         out = b[p:p + w * h].astype(np.uint8)
-    elif img_type == 11:                         # RLE
+    elif img_type == 11:
         out = np.empty(w * h, dtype=np.uint8)
         o = 0
         while o < out.size:
             pk = int(b[p]); p += 1
             cnt = (pk & 0x7F) + 1
-            if pk & 0x80:                        # повтор
+            if pk & 0x80:
                 out[o:o + cnt] = b[p]; p += 1
-            else:                                # литералы
+            else:
                 out[o:o + cnt] = b[p:p + cnt]; p += cnt
             o += cnt
     else:
@@ -123,7 +123,7 @@ def layer_mask(project: CeProject, name: str) -> np.ndarray:
     TGA-пиксель != 0 = закрашено."""
     arr = read_tga_gray(os.path.join(project.path, "layers", f"{name}.tga"))
     mask = arr != 0
-    return mask[::-1]                            # север сверху -> юг снизу
+    return mask[::-1]
 
 
 def water_mask(project: CeProject) -> np.ndarray | None:

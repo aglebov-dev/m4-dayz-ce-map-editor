@@ -15,13 +15,14 @@ import shutil
 import numpy as np
 
 from core.areaflags import AreaFlags
+from core.ce_import import shift_usage_east
 from core.writer import pack
 
 
 def _write_tga_gray(path: str, plane_south0: np.ndarray):
     """8bpp raw TGA (тип 3), начало кадра — верхний левый (север сверху).
     plane_south0 — bool[grid_y, grid_x], row 0 = ЮГ; переворачиваем под TGA."""
-    arr = np.ascontiguousarray(plane_south0[::-1])          # север сверху
+    arr = np.ascontiguousarray(plane_south0[::-1])
     h, w = arr.shape
     data = (arr.astype(np.uint8) * 255)
     header = bytes([0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 0, 0,
@@ -45,19 +46,15 @@ def export_project(af: AreaFlags, out_dir: str, cfglimits_src: str = "",
     os.makedirs(layers_dir, exist_ok=True)
     colors = colors or {}
 
-    # 0) подложка одним файлом map.png (BI-редактор ссылается на неё в проекте)
     has_bg = bool(background_png and os.path.isfile(background_png))
     if has_bg:
         shutil.copy2(background_png, os.path.join(out_dir, "map.png"))
 
-    # 1) areaflags.map (чистый v1)
     pack(af).tofile(os.path.join(out_dir, "areaflags.map"))
 
-    # 2) cfglimitsdefinition.xml — берём актуальный (с добавленными/удалёнными флагами)
     if cfglimits_src and os.path.isfile(cfglimits_src):
         shutil.copy2(cfglimits_src, os.path.join(out_dir, "cfglimitsdefinition.xml"))
 
-    # 3) TGA-слои по каждому флагу + записи проекта
     layer_xml = []
     n_layers = 0
     for name in af.values:
@@ -71,7 +68,7 @@ def export_project(af: AreaFlags, out_dir: str, cfglimits_src: str = "",
             f'visible="1" name="{fn}"/>')
         n_layers += 1
     for name in af.usages:
-        plane = af.plane(name)
+        plane = shift_usage_east(af.plane(name))
         fn = f"usgFlg_{name}"
         _write_tga_gray(os.path.join(layers_dir, f"{fn}.tga"), plane)
         bit = af.usages.index(name)
@@ -81,7 +78,6 @@ def export_project(af: AreaFlags, out_dir: str, cfglimits_src: str = "",
             f'visible="1" name="{fn}"/>')
         n_layers += 1
 
-    # 4) проект <zg-config>
     usages = "\n".join(f'            <usage name="{n}"/>' for n in af.usages)
     values = "\n".join(f'            <value name="{n}"/>' for n in af.values)
     xml = f"""<?xml version="1.0" encoding="UTF-8"?>

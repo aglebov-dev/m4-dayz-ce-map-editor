@@ -11,10 +11,10 @@ MISSION_MARKERS = ("cfglimitsdefinition.xml", "areaflags.map", "mapgroupproto.xm
 
 @dataclass
 class Mission:
-    name: str            # имя папки, напр. dayzOffline.chernarusplus
-    path: str            # абсолютный путь
-    world: str           # мир: суффикс после последней точки (chernarusplus)
-    world_size: int      # метры, из заголовка areaflags.map (или 15360 по умолчанию)
+    name: str
+    path: str
+    world: str
+    world_size: int
     has_areaflags: bool = False
 
 
@@ -35,33 +35,25 @@ def _world_size_from_areaflags(path: str) -> int | None:
     return size_x or None
 
 
-def _make_mission(path: str) -> Mission:
-    name = os.path.basename(os.path.normpath(path))
-    world = name.rsplit(".", 1)[-1].lower() if "." in name else name.lower()
+def _make_mission(path: str, name: str = "") -> Mission:
+    """Mission из папки data/. `name` (из config проекта) задаёт имя миссии и мир —
+    в плоской раскладке сама папка называется 'data', имя миссии хранится в config."""
+    label = os.path.basename((name or path).rstrip("/\\")) or "mission"
+    world = label.rsplit(".", 1)[-1].lower() if "." in label else label.lower()
     size = _world_size_from_areaflags(path) or 15360
     return Mission(
-        name=name, path=path, world=world, world_size=size,
+        name=label, path=path, world=world, world_size=size,
         has_areaflags=os.path.isfile(os.path.join(path, "areaflags.map")),
     )
 
 
-def scan_workdir(root: str) -> list[Mission]:
-    """Ищет карты: <root>/mpmissions/*, затем <root>/* как миссии, затем сам root."""
-    found: list[Mission] = []
-    mp = os.path.join(root, "data")
-    if os.path.isdir(mp):
-        for d in sorted(os.listdir(mp)):
-            p = os.path.join(mp, d)
-            if os.path.isdir(p) and _looks_like_mission(p):
-                found.append(_make_mission(p))
-    if not found and os.path.isdir(root):
-        for d in sorted(os.listdir(root)):
-            p = os.path.join(root, d)
-            if os.path.isdir(p) and _looks_like_mission(p):
-                found.append(_make_mission(p))
-    if not found and _looks_like_mission(root):
-        found.append(_make_mission(root))
-    return found
+def scan_workdir(root: str, mission_name: str = "") -> list[Mission]:
+    """Миссия проекта лежит плоско в <root>/data; имя миссии — из config (`mission_name`).
+    Вложенная раскладка `data/<миссия>/` и mission-в-корне больше НЕ поддерживаются."""
+    data = os.path.join(root, "data")
+    if _looks_like_mission(data):
+        return [_make_mission(data, name=mission_name)]
+    return []
 
 
 class Settings:

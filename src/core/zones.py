@@ -9,17 +9,17 @@ import numpy as np
 
 @dataclass
 class Zone:
-    cells: int                       # ячеек в зоне
-    bbox: tuple[int, int, int, int]  # col0, row0, col1, row1 (включительно; row 0 = ЮГ)
-    centroid: tuple[float, float]    # (col, row), дробные
+    cells: int
+    bbox: tuple[int, int, int, int]
+    centroid: tuple[float, float]
 
 
 def find_zones(mask: np.ndarray, min_cells: int = 1) -> list[Zone]:
     """Зоны маски bool[rows, cols], отсортированы по убыванию площади."""
     rows, cols = mask.shape
-    run_row: list[int] = []          # для каждого рана: строка
-    run_s: list[int] = []            # начало (вкл.)
-    run_e: list[int] = []            # конец (искл.)
+    run_row: list[int] = []
+    run_s: list[int] = []
+    run_e: list[int] = []
     parent: list[int] = []
 
     def find(i: int) -> int:
@@ -34,7 +34,7 @@ def find_zones(mask: np.ndarray, min_cells: int = 1) -> list[Zone]:
             parent[rb] = ra
 
     pad = np.zeros(cols + 2, dtype=np.int8)
-    prev: list[int] = []             # индексы ранов предыдущей строки
+    prev: list[int] = []
     for r in range(rows):
         pad[1:-1] = mask[r]
         d = np.diff(pad)
@@ -49,7 +49,6 @@ def find_zones(mask: np.ndarray, min_cells: int = 1) -> list[Zone]:
             run_s.append(s)
             run_e.append(e)
             cur.append(idx)
-            # 4-связность: пересечение по колонкам с ранами строки r-1
             while pi < len(prev) and run_e[prev[pi]] <= s:
                 pi += 1
             pj = pi
@@ -57,11 +56,10 @@ def find_zones(mask: np.ndarray, min_cells: int = 1) -> list[Zone]:
                 union(prev[pj], idx)
                 pj += 1
             if pj > pi:
-                pi = pj - 1          # последний пересёкшийся может задеть и следующий ран
+                pi = pj - 1
         prev = cur
 
-    # агрегация по корням
-    acc: dict[int, list] = {}        # root -> [cells, sum_col, sum_row, c0, r0, c1, r1]
+    acc: dict[int, list] = {}
     for i in range(len(parent)):
         root = find(i)
         n = run_e[i] - run_s[i]
@@ -76,7 +74,7 @@ def find_zones(mask: np.ndarray, min_cells: int = 1) -> list[Zone]:
             a[2] += run_row[i] * n
             a[3] = min(a[3], run_s[i])
             a[5] = max(a[5], run_e[i] - 1)
-            a[6] = run_row[i]        # строки идут по возрастанию
+            a[6] = run_row[i]
     zones = [Zone(cells=a[0], bbox=(a[3], a[4], a[5], a[6]),
                   centroid=(a[1] / a[0], a[2] / a[0]))
              for a in acc.values() if a[0] >= min_cells]

@@ -27,7 +27,7 @@ class LootPanel(QWidget):
         lay.addWidget(self.lst, 1)
         self._items: list[ItemType] = []
         self._bld_name = ""
-        self._counts: dict[str, int] | None = None   # режим области: зданий на предмет
+        self._counts: dict[str, int] | None = None
         self._region_bld = 0
 
     def clear(self):
@@ -55,7 +55,6 @@ class LootPanel(QWidget):
         self.lst.clear()
         if not self._bld_name and self._counts is None:
             return
-        # многочастный запрос: все части должны входить в имя/категорию
         tokens = self.edt.text().strip().lower().split()
         shown = 0
         for t in self._items:
@@ -63,7 +62,7 @@ class LootPanel(QWidget):
             if tokens and not all(tok in hay for tok in tokens):
                 continue
             text = f"{t.name}   ·  {t.category}  ·  nom {t.nominal} / min {t.min}"
-            if self._counts is not None:         # в области: где именно возможен
+            if self._counts is not None:
                 text += tr("loot.in_buildings", n=self._counts.get(t.name, 0))
             it = QListWidgetItem(text)
             it.setToolTip(f"{t.name}\nrestock {t.restock}s, lifetime {t.lifetime}s\n"

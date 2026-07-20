@@ -13,7 +13,6 @@ import numpy as np
 from PIL import Image
 
 
-# ---------- PBO ----------
 
 def parse_pbo_tiles(path: str):
     """Список спутниковых тайлов PBO: (x, y, offset, size). Заодно data_start."""
@@ -34,9 +33,9 @@ def parse_pbo_tiles(path: str):
     while True:
         name = read_z()
         method = struct.unpack_from("<I", data, pos)[0]; pos += 4
-        pos += 12                                   # 3×uint32
+        pos += 12
         size = struct.unpack_from("<I", data, pos)[0]; pos += 4
-        if name == "" and method == 0x56657273:     # заголовок версии
+        if name == "" and method == 0x56657273:
             while read_z() != "":
                 read_z()
             continue
@@ -51,13 +50,12 @@ def parse_pbo_tiles(path: str):
         low = name.lower()
         stem = os.path.splitext(os.path.basename(name))[0]
         if low.startswith("layers\\s_") and stem.lower().endswith("_lco"):
-            parts = stem.split("_")                 # S_XXX_YYY_lco
+            parts = stem.split("_")
             tiles.append((int(parts[1]), int(parts[2]), off, size))
         off += size
     return data, tiles
 
 
-# ---------- LZO1X ----------
 
 def lzo1x_decompress(src: bytes, dst_len: int) -> bytes:
     """Порт minilzo lzo1x_decompress (структура goto сохранена состоянием)."""
@@ -109,7 +107,6 @@ def lzo1x_decompress(src: bytes, dst_len: int) -> bytes:
             t = src[ip]; ip += 1
             state = "match"; continue
 
-        # state == "match"
         if t >= 64:
             m = op - 1 - ((t >> 2) & 7) - (src[ip] << 3); ip += 1
             t = (t >> 5) - 1
@@ -129,7 +126,7 @@ def lzo1x_decompress(src: bytes, dst_len: int) -> bytes:
                 t += 7 + src[ip]; ip += 1
             m -= (src[ip] | (src[ip + 1] << 8)) >> 2; ip += 2
             if m == op:
-                break                               # конец потока
+                break
             m -= 0x4000
         else:
             m = op - 1 - (t >> 2) - (src[ip] << 2); ip += 1
@@ -141,9 +138,9 @@ def lzo1x_decompress(src: bytes, dst_len: int) -> bytes:
             for _ in range(t):
                 dst[op] = src[ip]; op += 1; ip += 1
             t = src[ip]; ip += 1
-            continue                                # остаёмся в match
+            continue
 
-        t += 2                                      # копия матча (может перекрываться)
+        t += 2
         for _ in range(t):
             dst[op] = dst[m]; op += 1; m += 1
         t = src[ip - 2] & 3
@@ -152,11 +149,9 @@ def lzo1x_decompress(src: bytes, dst_len: int) -> bytes:
         for _ in range(t):
             dst[op] = src[ip]; op += 1; ip += 1
         t = src[ip]; ip += 1
-        # остаёмся в match
     return bytes(dst)
 
 
-# ---------- PAA + DXT (векторно) ----------
 
 def _expand565(c: np.ndarray):
     r = ((c >> 11) & 31) * 255 // 31
@@ -207,7 +202,7 @@ def decode_paa(data: bytes) -> np.ndarray:
     ptype = struct.unpack_from("<H", data, pos)[0]; pos += 2
     if ptype not in (0xFF01, 0xFF05):
         raise ValueError(f"неподдерживаемый PAA: 0x{ptype:04X}")
-    while True:                                     # TAGG'и
+    while True:
         marker = data[pos:pos + 4]
         if marker != b"GGAT":
             break
@@ -232,7 +227,6 @@ def decode_paa(data: bytes) -> np.ndarray:
     return decode_dxt5(mip, width, height)
 
 
-# ---------- склейка + пирамида ----------
 
 def _detect_overlap(left: np.ndarray, right: np.ndarray) -> int:
     """Перекрытие соседних тайлов: правый край левого ≈ левый край правого."""
@@ -276,14 +270,10 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
         px, py = x * step, y * step
         full[py:py + rgb.shape[0], px:px + rgb.shape[1]] = rgb[:, :, :3]
 
-    # НОРМАЛИЗАЦИЯ к 1 px/м: у некоторых миров спутник не 1 px/м (Enoch — 1.2),
-    # а редактор/TileMeta считают 1 px/м. Ужимаем полотно так, чтобы worldSize метров
-    # занимал (final - overlap_m) пикселей при 1 px/м — тогда подложка и оверлей флагов
-    # совпадают на любом мире.
     ppm = (full_size - overlap) / world_size
     img = Image.fromarray(full)
     if abs(ppm - 1.0) > 1e-3:
-        overlap_m = overlap / ppm                 # физическое перекрытие в метрах
+        overlap_m = overlap / ppm
         final = int(round(world_size + overlap_m))
         img = img.resize((final, final))
         full_size = final
@@ -294,8 +284,6 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
     out_tile = 256
     max_zoom = int(np.ceil(np.log2(full_size / out_tile)))
     img.resize((1024, 1024)).save(os.path.join(out_dir, "preview.jpg"), quality=85)
-    # map.png — единая подложка для BI-редактора (CE Tool: <background file="map.png">).
-    # Кап 4096: 15392² png был бы огромным, а фон в BI такого разрешения не требует.
     map_size = min(full_size, 4096)
     (img if full_size == map_size else img.resize((map_size, map_size))) \
         .save(os.path.join(out_dir, "map.png"))

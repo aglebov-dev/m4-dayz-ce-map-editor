@@ -8,26 +8,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
-Region = tuple[int, int, int, int]       # col0, row0, col1, row1 (включительно)
+Region = tuple[int, int, int, int]
 
 
 @dataclass
 class FlagStat:
-    key: str             # "tier:Tier1" / "usage:Military" — как в панели слоёв
+    key: str
     name: str
     cells: int
     area_km2: float
-    pct: float           # % от площади охвата (карта или выделение)
+    pct: float
 
 
 @dataclass
 class MapStats:
-    cells: int                       # ячеек в охвате
+    cells: int
     area_km2: float
-    flags: list[FlagStat]            # тиры, затем usage — порядок cfglimitsdefinition
-    any_usage_cells: int             # ячеек хотя бы с одним usage
+    flags: list[FlagStat]
+    any_usage_cells: int
     any_tier_cells: int
-    buildings: int = 0               # лутабельных инстансов в охвате
+    buildings: int = 0
 
 
 def clamp_region(af, region: Region) -> Region:
@@ -52,7 +52,7 @@ def bit_counts(arr: np.ndarray, nbits: int) -> list[int]:
     Через гистограмму БАЙТОВ: один проход на байт вместо прохода на каждый бит.
     На 16.7M ячеек — ~100 мс вместо ~390 (кисть пересчитывает это после каждого мазка).
     Порядок байтов little-endian — как и у ридера (`frombuffer` uint32)."""
-    a = np.ascontiguousarray(arr).reshape(-1)    # срез региона копируется, вся карта — нет
+    a = np.ascontiguousarray(arr).reshape(-1)
     if a.dtype == np.uint8:
         cols = a.reshape(-1, 1)
     else:
@@ -136,7 +136,7 @@ def items_for_region(types: dict, b, idx: np.ndarray, eff_u: np.ndarray,
                       eff_u[idx].astype(np.int64),
                       eff_v[idx].astype(np.int64)], axis=1)
     uniq, counts = np.unique(combo, axis=0, return_counts=True)
-    totals: dict[str, list] = {}                 # имя предмета -> [ItemType, зданий]
+    totals: dict[str, list] = {}
     for (ni, u, v), n in zip(uniq.tolist(), counts.tolist()):
         proto = b.protos.get(uniq_names[ni])
         if proto is None:

@@ -95,7 +95,7 @@ class LocalProvider(DataProvider):
 
     def fetch_to(self, rel: str, local_path: str):
         os.makedirs(os.path.dirname(local_path), exist_ok=True)
-        shutil.copy2(self._abs(rel), local_path)   # copy2 сохраняет mtime
+        shutil.copy2(self._abs(rel), local_path)
 
 
 class SftpProvider(DataProvider):
@@ -106,7 +106,7 @@ class SftpProvider(DataProvider):
     def __init__(self, host: str, user: str, root: str, *, port: int = 22,
                  password: str | None = None, key_path: str | None = None):
         try:
-            import paramiko  # noqa: F401
+            import paramiko
         except ImportError as e:
             raise ProviderError(
                 "SFTP недоступен: не установлен paramiko (pip install paramiko)") from e
@@ -166,7 +166,7 @@ class SftpProvider(DataProvider):
     def read_header(self, rel: str, n: int = 24) -> bytes:
         self._connect()
         with self._sftp.open(self._rpath(rel), "rb") as f:
-            return f.read(n)          # SFTP читает только n байт, не весь файл
+            return f.read(n)
 
     def mtime(self, rel: str) -> float:
         self._connect()
@@ -190,7 +190,7 @@ class SftpProvider(DataProvider):
 
 def sftp_available() -> bool:
     try:
-        import paramiko  # noqa: F401
+        import paramiko
         return True
     except ImportError:
         return False

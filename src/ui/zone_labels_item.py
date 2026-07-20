@@ -9,13 +9,10 @@ from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 
 from core.i18n import tr
 
-# зона мельче этого размера на экране (px по большей стороне) — без подписи
 MIN_ZONE_PX = 18
-# потолок подписей за отрисовку: зон бывают тысячи, читаемы всё равно единицы
 MAX_LABELS = 250
-# зазор между пилюлями при отборе: подписи не должны касаться друг друга
 LABEL_GAP_PX = 3
-SELECT_COLOR = QColor(255, 64, 64)       # зона, выбранная в панели «Зоны»
+SELECT_COLOR = QColor(255, 64, 64)
 
 
 class ZoneLabelsItem(QGraphicsItem):
@@ -27,8 +24,8 @@ class ZoneLabelsItem(QGraphicsItem):
         self._world = world_size
         self._margin = margin
         self._color = QColor(*color)
-        self._selected: int | None = None         # индекс зоны в списке панели
-        self._items: list[tuple[float, float, float, str]] = []   # x, y, размер_м, текст
+        self._selected: int | None = None
+        self._items: list[tuple[float, float, float, str]] = []
         for i, z in enumerate(zones[:MAX_LABELS], 1):
             wx = (z.centroid[0] + 0.5) * cell_size
             wz = (z.centroid[1] + 0.5) * cell_size
@@ -61,19 +58,19 @@ class ZoneLabelsItem(QGraphicsItem):
         Зоны отсортированы по убыванию площади — крупные занимают место первыми,
         мелкие уступают им и всплывают при зуме, когда место освободится."""
         fm = QFontMetricsF(self._font())
-        placed: list[QRectF] = []                 # занятые пилюли, экранные px
+        placed: list[QRectF] = []
         out: list[tuple[int, float, float]] = []
         for i, (x, y, span, text) in enumerate(self._items):
             selected = i == self._selected
             if not selected and span * lod < MIN_ZONE_PX:
-                continue                          # зона на экране слишком мелкая
+                continue
             w = fm.horizontalAdvance(text) + 10
             h = fm.height() + 4
-            sp = world.map(QPointF(x, y))         # центр подписи на экране
+            sp = world.map(QPointF(x, y))
             box = QRectF(sp.x() - w / 2 - LABEL_GAP_PX, sp.y() - h / 2 - LABEL_GAP_PX,
                          w + 2 * LABEL_GAP_PX, h + 2 * LABEL_GAP_PX)
             if not selected and any(box.intersects(p) for p in placed):
-                continue                          # место занято более крупной зоной
+                continue
             placed.append(box)
             out.append((i, w, h))
         return out
@@ -87,10 +84,8 @@ class ZoneLabelsItem(QGraphicsItem):
             selected = i == self._selected
             painter.save()
             painter.translate(x, y)
-            painter.scale(1.0 / lod, 1.0 / lod)   # экранный размер при любом зуме
+            painter.scale(1.0 / lod, 1.0 / lod)
             pill = QRectF(-w / 2, -h / 2, w, h)
-            # заливка тёмная, а не в цвет слоя: подпись лежит поверх заливки СВОЕГО
-            # слоя и цветом в цвет с ней слилась бы; принадлежность несёт рамка
             fill = QColor(SELECT_COLOR) if selected else QColor(20, 20, 20)
             fill.setAlpha(230)
             painter.setBrush(fill)

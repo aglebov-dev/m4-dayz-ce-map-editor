@@ -6,26 +6,27 @@ from __future__ import annotations
 import os
 
 import numpy as np
+from PySide6.QtCore import QUrl
 from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButton
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QDesktopServices, QIcon
 
+from core.building_index import load_index
+from core.i18n import tr
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
 )
+from core.paths import paths
 from light import project as P
-from light.config_dialog import ProjectConfigDialog
 from light.gating import missing_for, tool_ok
+from ui.diag import trace, log as _diag
 from ui.main_window import MainWindow
 
-# какие доки принадлежат какому инструменту (objectName -> tool).
-# Всё требует минимум карту — без файлов проекта инструменты закрыты и заблокированы.
 DOCK_TOOL = {
     "dock_layers": "map", "dock_inspector": "map", "dock_brush": "map",
     "dock_zones": "map", "dock_stats": "map",
     "dock_diff": "map", "dock_ce": "map",
-    "dock_obj_layers": "objects", "dock_objects": "objects",
+    "dock_buildings": "objects", "dock_objects": "objects",
     "dock_items": "economy", "dock_loot": "economy",
-    # территории убраны из лёгкого редактора: env/*.xml не материализуются (панель пуста)
 }
 
 
@@ -34,31 +35,27 @@ class LightMainWindow(MainWindow):
         super().__init__()
         self.project: P.Project | None = None
         self.setWindowTitle("m4 dayz ce map editor")
-        
-        # Устанавливаем иконку для окна
+
         icon_path = os.path.join(os.path.dirname(__file__), "..", "..", "app_icon_high.ico")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        
-        self.setMinimumSize(640, 400)            # лёгкое окно свободно сжимается
+
+        self.setMinimumSize(640, 400)
+        self.diff_panel.snapshot_requested.connect(self.diff_with_snapshot)
         self._add_project_buttons()
         self._map_dock_buttons()
         self._light_layout_setup()
-        # старт без проекта: инструменты закрыты и заблокированы, пока нет файлов
         self.apply_gating()
 
     def _light_layout_setup(self):
         from PySide6.QtCore import Qt
 
-        # 1) панели прилипают только к бокам (не к верху/низу)
         side = Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea
         for dock in self._docks.values():
             dock.setAllowedAreas(side)
             dock.topLevelChanged.connect(
                 lambda floating, d=dock: self._cap_floating(d) if floating else None)
 
-        # 2) территории удалены — прячем док и его кнопку (через действие тулбара:
-        #    hide() на виджете в тулбаре не убирает QWidgetAction)
         terr = self._docks.pop("dock_territories", None)
         if terr:
             terr.hide()
@@ -70,23 +67,40 @@ class LightMainWindow(MainWindow):
                     act.setVisible(False)
                     break
 
-        # 3) панель кисти не должна схлопываться в ноль
         self.brush_panel.setMinimumHeight(220)
 
-        # 4) убрать лишние элементы тулбара: миссия задаётся проектом, подложка —
-        #    при загрузке проекта. Прячем «Каталог», «Карта:»+комбобокс, «Background…».
         from PySide6.QtWidgets import QLabel, QWidgetAction
-        main_tb = [t for t in self.findChildren(type(self.tb_tools))
+        main_toolbar = [t for t in self.findChildren(type(self.tb_tools))
                    if t.windowTitle() != "tools"][0]
         drop = {self.btn_workdir, self.cmb_mission, self.btn_background}
-        for act in main_tb.actions():
+        for act in main_toolbar.actions():
             if isinstance(act, QWidgetAction):
                 wdt = act.defaultWidget()
-                if wdt in drop or isinstance(wdt, QLabel):   # QLabel тут только «Карта:»
+                if wdt in drop or isinstance(wdt, QLabel):
                     act.setVisible(False)
 
+    @trace
     def _cap_floating(self, dock):
-        """Отцепили панель — высота не больше половины экрана."""
+        """Отцепили панель — высота не больше половины экрана. resize ОТКЛАДЫВАЕМ на
+        следующий тик: менять геометрию дока прямо внутри topLevelChanged (Qt ещё
+        перестраивает layout, мышь захвачена) — ре-энтрантность в раскладку доков и
+        нативный abort (qFatal). После тика док уже верхнеуровневое окно — resize безопасен."""
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(0, lambda d=dock: self._cap_floating_now(d))
+
+    @trace
+    def _cap_floating_now(self, dock):
+        from PySide6.QtWidgets import QApplication
+        from PySide6.QtCore import Qt as _Qt, QTimer
+        if QApplication.mouseButtons() != _Qt.MouseButton.NoButton:
+            _diag("defer _cap_floating_now (drag in progress)")
+            QTimer.singleShot(60, lambda d=dock: self._cap_floating_now(d))
+            return
+        try:
+            if not dock.isFloating():
+                return
+        except RuntimeError:
+            return
         scr = self.screen().availableGeometry() if self.screen() else None
         if not scr:
             return
@@ -94,7 +108,6 @@ class LightMainWindow(MainWindow):
         if dock.height() > max_h:
             dock.resize(dock.width(), max_h)
 
-    # ---------- статистика/выделение: не открывать Спавн ----------
 
     def refresh_region_loot(self):
         """Заполняем сводку спавна по области, но НЕ открываем панель «Спавн» —
@@ -106,63 +119,79 @@ class LightMainWindow(MainWindow):
         from core.stats import buildings_in_region, items_for_region
         idx = buildings_in_region(self.areaflags, b, region)
         rows = items_for_region(self.types, b, idx, self.bld_eff_u, self.bld_eff_v)
-        self.loot_panel.show_region_items(len(idx), rows)   # без show()/raise_()
+        self.loot_panel.show_region_items(len(idx), rows)
 
     def on_region_selected(self, x0, z0, x1, z1):
         super().on_region_selected(x0, z0, x1, z1)
         if self.dock_stats.toggleViewAction().isEnabled():
             self.dock_stats.show()
-            self.dock_stats.raise_()          # фокус — на статистике, а не на Спавне
+            self.dock_stats.raise_()
 
     def _load_territories(self, m):
         """Территории удалены из лёгкого редактора."""
         return
 
-    # ---------- кнопки проекта ----------
 
     def _add_project_buttons(self):
-        # первый тулбар (не «tools», где кнопки панелей)
         toolbars = [t for t in self.findChildren(type(self.tb_tools))
                     if t.windowTitle() != "tools"]
-        main_tb = toolbars[0]
-        first = main_tb.actions()[0]
+        main_toolbar = toolbars[0]
+        first = main_toolbar.actions()[0]
 
-        # СОХРАНИТЬ — яркая заметная кнопка слева
-        self.btn_save = QToolButton()
-        self.btn_save.setText("save")
-        self.btn_save.setToolTip("write areaflags.map")
-        self.btn_save.clicked.connect(self.on_save)
-        self.btn_save.setStyleSheet(
+        self.button_save = QToolButton()
+        self.button_save.setText(tr("toolbar.save"))
+        self.button_save.setToolTip(tr("toolbar.save_tip"))
+        self.button_save.clicked.connect(self.on_save)
+        self.button_save.setStyleSheet(
             "QToolButton { background:#2e7d32; color:white; font-weight:bold;"
             " padding:3px 10px; border-radius:3px; }"
             "QToolButton:disabled { background:#c8c8c8; color:#888; }")
-        self.btn_save.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_save)
+        self.button_save.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_save)
 
-        self.btn_open = QToolButton()
-        self.btn_open.setText("Открыть проект…")
-        self.btn_open.setToolTip("Открыть/настроить проект (источник, файлы, снапшот)")
-        self.btn_open.clicked.connect(self.open_project_dialog)
-        main_tb.insertWidget(first, self.btn_open)
+        self.button_open = QToolButton()
+        self.button_open.setText(tr("toolbar.open_project"))
+        self.button_open.setToolTip(tr("toolbar.open_project_tip"))
+        self.button_open.clicked.connect(self.open_project_dialog)
+        main_toolbar.insertWidget(first, self.button_open)
 
-        self.btn_reload = QToolButton()
-        self.btn_reload.setText("Перезагрузить проект")
-        self.btn_reload.setToolTip("Перечитать файлы проекта из источника (сбросит "
-                                   "несохранённые правки)")
-        self.btn_reload.clicked.connect(self.reload_project)
-        self.btn_reload.setEnabled(False)
-        main_tb.insertWidget(first, self.btn_reload)
-        main_tb.insertSeparator(first)
+        self.button_reload = QToolButton()
+        self.button_reload.setText(tr("toolbar.reload_project"))
+        self.button_reload.setToolTip(tr("toolbar.reload_project_tip"))
+        self.button_reload.clicked.connect(self.reload_project)
+        self.button_reload.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_reload)
 
-        self.btn_bi_export = QToolButton()
-        self.btn_bi_export.setText("Экспорт в BI…")
-        self.btn_bi_export.setToolTip("Экспорт проекта CE Tool: areaflags.map + "
-                                      "cfglimits + TGA-слои по флагам + проект XML")
-        self.btn_bi_export.clicked.connect(self.export_to_bi)
-        self.btn_bi_export.setEnabled(False)
-        main_tb.addWidget(self.btn_bi_export)
+        self.button_snapshot = QToolButton()
+        self.button_snapshot.setText(tr("toolbar.snapshot"))
+        self.button_snapshot.setToolTip(tr("toolbar.snapshot_tip"))
+        self.button_snapshot.clicked.connect(self.revert_to_snapshot)
+        self.button_snapshot.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_snapshot)
+        main_toolbar.insertSeparator(first)
 
-        # добавление/удаление флагов — в панели «Слои» (заголовки секций и строки)
+        self.button_bi_export = QToolButton()
+        self.button_bi_export.setText(tr("toolbar.bi_export"))
+        self.button_bi_export.setToolTip(tr("toolbar.bi_export_tip"))
+        self.button_bi_export.clicked.connect(self.export_to_bi)
+        self.button_bi_export.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_bi_export)
+
+        self.button_folder = QToolButton()
+        self.button_folder.setText(tr("toolbar.folder"))
+        self.button_folder.setToolTip(tr("toolbar.folder_tip"))
+        self.button_folder.clicked.connect(self.open_map_folder)
+        self.button_folder.setEnabled(False)
+        main_toolbar.insertWidget(first, self.button_folder)
+
+        lang_action = next((a for a in main_toolbar.actions()
+                            if main_toolbar.widgetForAction(a) is self.cmb_lang), None)
+        if lang_action is not None:
+            main_toolbar.removeAction(lang_action)
+        new_lang_action = main_toolbar.insertWidget(first, self.cmb_lang)
+        new_lang_action.setVisible(True)
+        self.cmb_lang.setVisible(True)
+
         self.layers_panel.allow_add_flag = True
         self.layers_panel.add_flag_requested.connect(self.add_flag)
         self.layers_panel.del_flag_requested.connect(self.del_flag)
@@ -179,41 +208,119 @@ class LightMainWindow(MainWindow):
                     self._dock_btn[name] = w
                     break
 
-    # ---------- проект ----------
 
     def open_project_dialog(self):
-        dlg = ProjectConfigDialog(self, existing=self.project)
-        if dlg.exec() and dlg.result_project:
-            self.open_project(dlg.result_project)
+        from light.welcome_window import WelcomeWindow
+        welcome = WelcomeWindow(self)
+        if welcome.exec() and welcome.result_project:
+            self.open_project(welcome.result_project)
 
-    def open_project(self, proj: P.Project):
+    def open_project(self, proj: P.Project) -> bool:
+        """Открыть проект. True — карта загружена; False — карты нет / файл повреждён
+        (редактор показывать не нужно, сообщение уже показано)."""
+        self._save_project_layout()
         self.project = proj
-        self.load_workdir(proj.workdir)          # ядро читает материализованную миссию
+        self.load_workdir(proj.workdir, proj.mission_name, silent=True)
+        if self.areaflags is None:
+            QMessageBox.warning(
+                self, "Загрузка проекта",
+                f"Не удалось открыть «{proj.name}»: карта не найдена или файл повреждён.")
+            self.project = None
+            return False
+        self._restore_project_layout()
         self.apply_gating()
-        self.btn_bi_export.setEnabled(True)
-        self.btn_reload.setEnabled(True)
-        has_map = self.areaflags is not None
-        self.btn_save.setEnabled(has_map)
+        self.button_bi_export.setEnabled(True)
+        self.button_folder.setEnabled(True)
+        self.button_reload.setEnabled(True)
+        has_snapshot = self.project.has_snapshot()
+        self.button_snapshot.setEnabled(has_snapshot)
+        self.button_save.setEnabled(True)
         self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name}")
+        self.diff_panel.set_snapshot_available(has_snapshot)
+        if has_snapshot:
+            self.diff_with_snapshot(raise_dock=False)
+        return True
 
-    def reload_project(self):
-        """Перечитать файлы проекта из источника (потеряет несохранённые правки)."""
+
+    def _save_project_layout(self):
+        """Сохранить раскладку панелей текущего проекта (в его layout.json)."""
         if not self.project:
             return
-        from PySide6.QtWidgets import QMessageBox
+        try:
+            state = bytes(self.saveState().toBase64()).decode()
+            P.save_layout(self.project, state)
+        except Exception:
+            pass
+
+    def _restore_project_layout(self):
+        """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков)."""
+        if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        state = P.load_layout(self.project) if self.project else None
+        if not state:
+            return
+        from PySide6.QtCore import QByteArray
+        try:
+            self.restoreState(QByteArray.fromBase64(state.encode()))
+        except Exception:
+            pass
+
+    def closeEvent(self, ev):
+        self._save_project_layout()
+        super().closeEvent(ev)
+
+    def diff_with_snapshot(self, raise_dock: bool = True):
+        """Сравнить текущую карту со снапшотом проекта (исходным состоянием при создании)."""
+        if not self.project or not self.project.has_snapshot():
+            self.diff_panel.show_error("У проекта нет снапшота")
+            return
+        snapshot_dir = P.snapshot_mission_dir(self.project)
+        if not snapshot_dir:
+            self.diff_panel.show_error("Снапшот пуст")
+            return
+        self.load_diff(os.path.join(snapshot_dir, "areaflags.map"), raise_dock=raise_dock,
+                       source=tr("diff.src_snapshot"))
+
+    def reload_project(self):
+        """Перечитать локальные файлы проекта (последнее сохранение на диске); сбрасывает
+        несохранённые правки. Данные из источника заново НЕ тянем."""
+        if not self.project:
+            return
         if self._dirty_cells:
             ok = QMessageBox.question(
                 self, "Перезагрузить",
                 f"Несохранённых правок: {self._dirty_cells} ячеек. Перечитать проект "
-                f"из источника и потерять их?")
+                f"с диска (последнее сохранение) и потерять их?")
             if ok != QMessageBox.StandardButton.Yes:
                 return
-        from light.providers import make_provider
+        self.open_project(self.project)
+
+    def open_map_folder(self):
+        """Открыть в проводнике папку с файлами текущей карты (data/ проекта)."""
+        if not self.project:
+            return
+        path = str(self.project.mission_dir)
+        if os.path.isdir(path):
+            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+
+    def revert_to_snapshot(self):
+        """Откат к снапшоту: восстановить исходное состояние проекта (каким оно было при
+        создании) из snapshot/ и перечитать. Теряются ВСЕ правки, включая сохранённые."""
+        if not self.project:
+            return
+        if not self.project.has_snapshot():
+            QMessageBox.information(self, "Снапшот", "У проекта нет снапшота.")
+            return
+        ok = QMessageBox.question(
+            self, "Откат к снапшоту",
+            "Вернуть проект к снапшоту (исходному состоянию при создании)? "
+            "Все правки, включая сохранённые на диск, будут потеряны.")
+        if ok != QMessageBox.StandardButton.Yes:
+            return
         try:
-            prov = make_provider(self.project.provider_cfg)
-            P.materialize(self.project, prov)
+            P.restore_snapshot(self.project)
         except Exception as e:
-            QMessageBox.warning(self, "Перезагрузка", f"Не удалось: {e}")
+            QMessageBox.warning(self, "Откат к снапшоту", f"Не удалось: {e}")
             return
         self.open_project(self.project)
 
@@ -223,12 +330,14 @@ class LightMainWindow(MainWindow):
         чужую подложку и ломала масштаб. Имя мира миссии (m.world) для поиска не годится:
         у миссии-в-корне оно берётся из имени папки (DATA_SAMPLE≠chernarusplus)."""
         from light import tiles_store
-        proj = getattr(self, "project", None)    # super().__init__ может звать до нас
+        proj = getattr(self, "project", None)
         bg = proj.background if proj else ""
+        canon_world = bg.split(":", 1)[1] if bg.startswith("tiles") and ":" in bg else m.world
+        self.building_index = load_index(paths.buildings_roots(), canon_world)
         if bg.startswith("tiles"):
             world = bg.split(":", 1)[1] if ":" in bg else m.world
             meta = tiles_store.find(world)
-            if meta and abs(meta.world_size - m.world_size) < 1:   # тайлы того же мира
+            if meta and abs(meta.world_size - m.world_size) < 1:
                 self.view.load_tiles(meta)
                 self.lbl_bg.setText(f"подложка: тайлы {world}")
                 return
@@ -237,15 +346,13 @@ class LightMainWindow(MainWindow):
             if os.path.isfile(path) and self.view.load_image(path, m.world_size):
                 self.lbl_bg.setText(f"подложка: {os.path.basename(path)}")
                 return
-        # подложки нет — пустая сцена ТЕКУЩЕГО мира (не тянем чужие assets)
         self.view.clear_map()
-        self.view._world_size = m.world_size     # иначе останется размер прошлой карты
+        self.view._world_size = m.world_size
         self.view.set_content_rect(m.world_size, m.world_size)
         self.view.add_border()
         self.view.fit_all()
         self.lbl_bg.setText("подложки нет")
 
-    # ---------- добавление usage/value-флагов ----------
 
     def add_flag(self, kind: str):
         af = self.areaflags
@@ -257,7 +364,7 @@ class LightMainWindow(MainWindow):
             return
         try:
             (add_usage if kind == "usage" else add_value)(af, name)
-            write_cfglimits(self.project.mission_dir, af)   # порядок битов на диск
+            write_cfglimits(self.project.mission_dir, af)
         except FlagError as e:
             QMessageBox.warning(self, "Флаг", str(e))
             return
@@ -290,7 +397,7 @@ class LightMainWindow(MainWindow):
         if self.brush_panel.layer_key() == key:
             self.view.set_brush_mode(False)
             self.brush_panel.sw_mode.setChecked(False)
-        self.view.set_overlay(key, None)         # снять оверлей удалённого слоя
+        self.view.set_overlay(key, None)
         self._layers_built.discard(key)
         self._repopulate_layers()
         self._after_edit()
@@ -300,15 +407,10 @@ class LightMainWindow(MainWindow):
         """Перестроить панель слоёв и список кисти под текущие usage/value (после
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
-        counts_tier = [int(np.count_nonzero(af.tier & (1 << b)))
-                       for b in range(len(af.values))]
-        counts_usage = [int(np.count_nonzero(af.usage & np.uint32(1 << b)))
-                        for b in range(len(af.usages))]
-        colors = {f"tier:{n}": self.layer_color(f"tier:{n}") for n in af.values}
-        colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
-        self.layers_panel.populate(af, counts_tier, counts_usage, colors, tiers_on=False)
-        self.brush_panel.populate([(f"tier:{n}", n) for n in af.values]
-                                  + [(f"usage:{n}", n) for n in af.usages])
+        self.layers.populate(af, tiers_on=False)
+        self.brush_panel.populate(
+            [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
 
     def apply_gating(self):
         """Блокировать инструменты, чьих файлов нет; подсказать, каких именно."""
@@ -318,8 +420,6 @@ class LightMainWindow(MainWindow):
             if not dock:
                 continue
             ok = tool_ok(files, tool)
-            # блокируем САМО toggleViewAction — кнопка-тогл синхронизируется от него
-            # (btn.setEnabled перетёрлось бы состоянием действия)
             act = dock.toggleViewAction()
             act.setEnabled(ok)
             if ok:
@@ -329,9 +429,7 @@ class LightMainWindow(MainWindow):
                                + ", ".join(missing_for(files, tool)))
                 dock.hide()
 
-    # ---------- Диф со снапшотом (режим A) ----------
 
-    # ---------- экспорт в BI (L5) ----------
 
     def export_to_bi(self):
         af = self.areaflags
@@ -346,7 +444,7 @@ class LightMainWindow(MainWindow):
         colors |= {f"usage:{n}": self.layer_color(f"usage:{n}") for n in af.usages}
         world = P.world_name(self.project.mission_name)
         cfg = os.path.join(self.project.mission_dir, "cfglimitsdefinition.xml")
-        meta = tiles_store.find(world)           # подложка мира → map.png в проект
+        meta = tiles_store.find(world)
         bg_png = os.path.join(meta.root, "map.png") if meta else ""
         try:
             info = export_project(af, folder, cfglimits_src=cfg, colors=colors,

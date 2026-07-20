@@ -13,9 +13,9 @@ import numpy as np
 
 @dataclass
 class TerritoryLayer:
-    name: str                        # имя файла без _territories.xml (bear, wolf, ...)
+    name: str
     path: str
-    color: tuple[int, int, int]      # из первого <territory color=...>
+    color: tuple[int, int, int]
     x: np.ndarray = field(default_factory=lambda: np.empty(0))
     z: np.ndarray = field(default_factory=lambda: np.empty(0))
     r: np.ndarray = field(default_factory=lambda: np.empty(0))
@@ -59,7 +59,7 @@ def read_territories(mission_path: str) -> list[TerritoryLayer]:
         except ET.ParseError:
             continue
         xs, zs, rs = [], [], []
-        color = (255, 140, 0)                    # запаска, если color не задан
+        color = (255, 140, 0)
         first = True
         for terr in root.findall("territory"):
             if first:

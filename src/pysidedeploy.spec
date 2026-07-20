@@ -10,18 +10,18 @@ project_dir = .
 input_file = app.py
 
 # directory where the executable output is generated
-exec_directory = D:\dayz-repositories\M4.DayZ.CE.Map.Editor\src
+exec_directory = D:\dayz-repositories\M4.DayZ.CE.Map.Editor.clean\dist
 
 # path to the project file relative to project_dir
 project_file = 
 
 # application icon
-icon = D:\dayz-repositories\M4.DayZ.CE.Map.Editor\app_icon_high.ico
+icon = D:\dayz-repositories\M4.DayZ.CE.Map.Editor.clean\app_icon_high.ico
 
 [python]
 
 # python path
-python_path = D:\dayz-repositories\M4.DayZ.CE.Map.Editor\.venv\Scripts\python.exe
+python_path = D:\dayz-repositories\M4.DayZ.CE.Map.Editor.clean\.venv\Scripts\python.exe
 
 # python packages to install
 packages = Nuitka==4.0
@@ -65,10 +65,21 @@ plugins =
 macos.permissions = 
 
 # mode of using nuitka. accepts standalone or onefile. default = onefile
+# onefile = one .exe (unpacks to a temp dir on launch). For onedir (faster start, assets
+# sit next to the exe as loose files) set = mode = standalone
 mode = onefile
 
 # specify any extra nuitka arguments
-extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads
+#  bundle only the translations (i18n). everything else the app builds into appdata itself = 
+#  the user unpacks satellite tiles and generates building footprints from the game files
+#  (background panel -> unpack). data is portable = it lands in an "appdata" folder next to
+#  the exe (<exe_dir>/appdata/{tiles,buildings,projects,...}); if that location is read-only
+#  (e.g. program files) it falls back to %localappdata%/m4dayzcemapeditor. see core/paths.py.
+#  so assets/tiles and assets/buildings are not bundled.
+#  --include-package = paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
+#     if the build fails on the 'cryptography' dependency, drop this arg (sftp off, rest works).
+# note = keep this file ASCII-only -- pyside6-deploy reads the spec as cp1252, not utf-8.
+extra_args = --quiet --noinclude-qt-translations --windows-console-mode=disable --assume-yes-for-downloads --include-data-dir=D:/dayz-repositories/M4.DayZ.CE.Map.Editor.clean/assets/i18n=assets/i18n --include-package=paramiko
 
 [buildozer]
 

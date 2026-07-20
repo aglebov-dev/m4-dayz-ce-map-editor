@@ -58,7 +58,7 @@ class FlowLayout(QLayout):
         for it in self._items:
             w = it.sizeHint().width()
             h = it.sizeHint().height()
-            if x + w > right and line_h > 0:     # не влезает — новая строка
+            if x + w > right and line_h > 0:
                 x = rect.x() + m.left()
                 y += line_h + self._spacing
                 line_h = 0

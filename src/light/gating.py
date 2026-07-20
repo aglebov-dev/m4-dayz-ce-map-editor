@@ -3,12 +3,11 @@ from __future__ import annotations
 
 from light.project import ROLES
 
-# Инструмент -> роли файлов, без которых он не работает.
 TOOL_REQUIRES = {
-    "map": ["areaflags", "cfglimits"],          # Слои, инспектор слоёв
-    "objects": ["mapgroupproto", "mapgrouppos"],  # Объекты, инспектор объектов
-    "economy": ["economycore", "types"],        # Спавн/Предметы
-    "territories": ["environment"],             # Территории
+    "map": ["areaflags", "cfglimits"],
+    "objects": ["mapgroupproto", "mapgrouppos"],
+    "economy": ["economycore", "types"],
+    "territories": ["environment"],
 }
 
 _TITLE = {r.key: r.title for r in ROLES}

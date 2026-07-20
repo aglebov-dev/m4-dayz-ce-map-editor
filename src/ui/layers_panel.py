@@ -5,8 +5,8 @@ from __future__ import annotations
 from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import (
-    QAbstractButton, QHBoxLayout, QLabel, QScrollArea, QSlider, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractButton, QComboBox, QHBoxLayout, QLabel, QScrollArea, QSlider,
+    QToolButton, QVBoxLayout, QWidget,
 )
 
 from core.areaflags import AreaFlags
@@ -56,7 +56,6 @@ class LayerRow(QWidget):
         self.key = key
         self._panel = panel
         self.active = False
-        # без WA_StyledBackground фон из styleSheet у QWidget-наследника не рисуется
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
         self.btn = Switch(color, self)
@@ -71,8 +70,6 @@ class LayerRow(QWidget):
 
         self.text = QLabel(f"{name}  ({count:,})".replace(",", " "), self)
         self.text.setToolTip(tr("layers.zones_tip"))
-        # пустой слой (0 ячеек) НЕ отключаем: в редакторе на него можно рисовать —
-        # включаем показ и красим кистью. Серый текст остаётся как пометка «пусто».
         self._enabled = True
         if count == 0:
             self.text.setStyleSheet("color: gray;")
@@ -82,7 +79,6 @@ class LayerRow(QWidget):
         lay.addWidget(self.btn)
         lay.addWidget(self.swatch)
         lay.addWidget(self.text, 1)
-        # «×» удалить флаг — только в редакторе и только для тиров/usage
         if getattr(panel, "allow_add_flag", False) and key.split(":", 1)[0] in (
                 "tier", "usage"):
             self.btn_del = QToolButton(self)
@@ -125,16 +121,16 @@ class LayersPanel(QWidget):
 
     layer_toggled = Signal(str, bool)
     color_clicked = Signal(str)
-    layer_selected = Signal(str)         # клик по строке слоя — показать его зоны
-    opacity_changed = Signal(str, int)   # (префикс раздела, значение 0..100)
-    add_flag_requested = Signal(str)     # "usage"/"value" — добавить новый флаг (редактор)
-    del_flag_requested = Signal(str)     # key слоя — удалить флаг (редактор)
+    layer_selected = Signal(str)
+    opacity_changed = Signal(str, int)
+    add_flag_requested = Signal(str)
+    del_flag_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._rows: list[LayerRow] = []
-        self._perm_sliders: list[QSlider] = []   # переживают clear()
-        self.allow_add_flag = False              # редактор включает «＋» в заголовках
+        self._perm_sliders: list[QSlider] = []
+        self.allow_add_flag = False
         self.setMinimumWidth(230)
         self._init_sliders()
 
@@ -151,7 +147,6 @@ class LayersPanel(QWidget):
         lay.addWidget(scroll, 1)
 
     def _init_sliders(self):
-        # слайдеры прозрачности разделов живут постоянно (populate их переставляет)
         self.sld_tier = self._make_slider("tier:", 45, tr("layers.tier_opacity_tip"))
         self.sld_usage = self._make_slider("usage:", 55, tr("layers.usage_opacity_tip"))
 
@@ -192,7 +187,7 @@ class LayersPanel(QWidget):
             it = self._list_lay.takeAt(0)
             w = it.widget()
             if w in self._perm_sliders:
-                w.setParent(None)                # постоянные виджеты не убиваем
+                w.setParent(None)
             elif w:
                 w.deleteLater()
 
@@ -231,7 +226,6 @@ class LayersPanel(QWidget):
         lay.addWidget(lbl, 1)
         lay.addWidget(b_on)
         lay.addWidget(b_off)
-        # «＋» добавить флаг — только в редакторе и только для тиров/usage
         if self.allow_add_flag and prefix in ("tier:", "usage:"):
             kind = "value" if prefix == "tier:" else "usage"
             b_add = QToolButton(head)
@@ -248,21 +242,63 @@ class LayersPanel(QWidget):
         self._list_lay.addWidget(row)
 
 
-class ObjectsLayersPanel(LayersPanel):
-    """Отдельная панель слоёв объектов (здания по флагам). Тот же контракт сигналов."""
+_MODES = ("points", "contour", "both")
+
+
+class BuildingsLayersPanel(LayersPanel):
+    """Панель слоёв зданий по флагам (ключи `obj:…`). Режим отображения (точки / контур /
+    точки+контур) — переключателем сверху; три раздельных слайдера прозрачности: точки
+    (`objpoints:`), заливка контура (`obj:`), обводка контура (`objborder:`)."""
+
+    mode_changed = Signal(str)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.layout().insertWidget(0, self._mode_row())
 
     def _init_sliders(self):
-        self.sld_obj = self._make_slider("obj:", 100, tr("layers.obj_opacity_tip"))
+        self.sld_points = self._make_slider("objpoints:", 50,
+                                            tr("layers.bld_points_opacity_tip"))
+        self.sld_obj = self._make_slider("obj:", 50, tr("layers.bld_opacity_tip"))
+        self.sld_border = self._make_slider("objborder:", 100,
+                                            tr("layers.bld_border_opacity_tip"))
 
     def opacity(self, prefix: str) -> float:
         return self.sld_obj.value() / 100.0
 
+    def _mode_row(self) -> QWidget:
+        self.cmb_mode = QComboBox()
+        self.cmb_mode.addItems([tr("bld.mode_points"), tr("bld.mode_contour"),
+                                tr("bld.mode_both")])
+        self.cmb_mode.setCurrentIndex(1)
+        self.cmb_mode.currentIndexChanged.connect(
+            lambda i: self.mode_changed.emit(_MODES[i]))
+        row = QWidget()
+        lay = QHBoxLayout(row)
+        lay.setContentsMargins(4, 4, 4, 0)
+        lay.addWidget(QLabel(tr("bld.mode")))
+        lay.addWidget(self.cmb_mode, 1)
+        return row
+
+    def mode(self) -> str:
+        return _MODES[self.cmb_mode.currentIndex()]
+
+    def points_opacity(self) -> float:
+        return self.sld_points.value() / 100.0
+
+    def border_opacity(self) -> float:
+        return self.sld_border.value() / 100.0
+
     def populate(self, objects: list[tuple[str, str, tuple[int, int, int], int]]):
-        """objects: (key, имя, цвет, счётчик)."""
         self.clear()
         if objects:
-            self._add_header(tr("layers.objects"), "obj:")
+            self._add_header(tr("layers.buildings"), "obj:")
+            self._list_lay.addWidget(QLabel(tr("layers.bld_points")))
+            self._list_lay.addWidget(self.sld_points)
+            self._list_lay.addWidget(QLabel(tr("layers.bld_fill")))
             self._list_lay.addWidget(self.sld_obj)
+            self._list_lay.addWidget(QLabel(tr("layers.bld_border")))
+            self._list_lay.addWidget(self.sld_border)
             for key, name, color, count in objects:
                 self._add_row(key, name, color, count)
         self._list_lay.addStretch(1)

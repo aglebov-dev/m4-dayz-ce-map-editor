@@ -34,12 +34,12 @@ class FlagRow(QWidget):
 
 
 class InspectorPanel(QWidget):
-    layer_toggle_requested = Signal(str, bool)   # (ключ слоя, видимость)
+    layer_toggle_requested = Signal(str, bool)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.sw_active = Switch((76, 175, 80), self)
-        self.sw_active.setChecked(True)
+        self.sw_active.setChecked(False)
         head = QHBoxLayout()
         head.addWidget(self.sw_active)
         head.addWidget(QLabel(tr("inspector.toggle")))
@@ -60,8 +60,7 @@ class InspectorPanel(QWidget):
         self._flags_lay = QVBoxLayout()
         self._flags_lay.setSpacing(0)
         self._rows: list[FlagRow] = []
-        # снимок последней точки для перестроения при смене режима/состояний
-        self._last: tuple | None = None          # (x, z, af, colors)
+        self._last: tuple | None = None
         self._visible: dict[str, bool] = {}
 
         lay = QVBoxLayout(self)
@@ -75,7 +74,6 @@ class InspectorPanel(QWidget):
     def is_active(self) -> bool:
         return self.sw_active.isChecked()
 
-    # ---------- данные ----------
 
     def show_point(self, x: float, z: float, af: AreaFlags | None,
                    colors: dict[str, tuple[int, int, int]] | None = None,
@@ -96,10 +94,9 @@ class InspectorPanel(QWidget):
             row.sw.blockSignals(True)
             row.sw.setChecked(visible)
             row.sw.blockSignals(False)
-        if self.sw_only_visible.isChecked():     # в режиме "только включённые" состав меняется
+        if self.sw_only_visible.isChecked():
             self._rebuild()
 
-    # ---------- отрисовка ----------
 
     def _clear_rows(self):
         self._rows.clear()
@@ -126,8 +123,8 @@ class InspectorPanel(QWidget):
         umask = int(af.usage[idx])
         tmask = int(af.tier[idx])
         water_line = ""
-        if water:                                # water-fresh = пресная вода (пруды),
-            water_line = "<br>" + tr("inspector.water")   # не море; сушу не утверждаем
+        if water:
+            water_line = "<br>" + tr("inspector.water")
         self.info.setText(
             f"{head}<br>"
             f"{tr('inspector.cell', col=col, row=row)}<br>"

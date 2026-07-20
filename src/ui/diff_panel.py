@@ -15,29 +15,41 @@ from ui.overlays import DIFF_ADDED, DIFF_REMOVED
 
 
 class DiffPanel(QWidget):
-    """Сигналы: load_requested() — выбрать второй срез;
-    flag_clicked(key) — показать дифф флага на карте; clear_requested()."""
+    """Сигналы: snapshot_requested() — сравнить со снапшотом проекта;
+    load_requested() — выбрать другой areaflags.map; flag_clicked(key) — дифф флага
+    на карте; clear_requested()."""
 
+    snapshot_requested = Signal()
     load_requested = Signal()
     flag_clicked = Signal(str)
     clear_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.btn_snapshot = QPushButton(tr("diff.snapshot"))
+        self.btn_snapshot.clicked.connect(self.snapshot_requested)
+        self.btn_snapshot.setEnabled(False)
         self.btn_load = QPushButton(tr("diff.load"))
         self.btn_load.clicked.connect(self.load_requested)
         self.btn_clear = QPushButton(tr("diff.clear"))
         self.btn_clear.clicked.connect(self.clear_requested)
         self.btn_clear.setEnabled(False)
         top = QHBoxLayout()
-        top.addWidget(self.btn_load, 1)
-        top.addWidget(self.btn_clear)
+        top.addWidget(self.btn_snapshot, 1)
+        top.addWidget(self.btn_clear, 1)
+        second = QHBoxLayout()
+        second.addWidget(self.btn_load, 1)
+        buttons = QVBoxLayout()
+        buttons.setSpacing(4)
+        buttons.addLayout(top)
+        buttons.addLayout(second)
 
         self.lbl = QLabel(tr("diff.hint"))
         self.lbl.setWordWrap(True)
         self.lbl.setTextFormat(Qt.TextFormat.RichText)
 
         self.legend = QLabel()
+        self.legend.setWordWrap(True)
         self.legend.setTextFormat(Qt.TextFormat.RichText)
         self.legend.setText(tr(
             "diff.legend",
@@ -54,8 +66,6 @@ class DiffPanel(QWidget):
         self.tbl.setSortingEnabled(True)
         self.tbl.itemClicked.connect(self._on_item)
         h = self.tbl.horizontalHeader()
-        # ширину колонок задаёт пользователь (Interactive), стартовые — компактные:
-        # флаг не растягиваем на всю панель, числа узкие
         h.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         h.setStretchLastSection(False)
         self.tbl.setColumnWidth(0, 150)
@@ -64,10 +74,14 @@ class DiffPanel(QWidget):
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(4, 4, 4, 4)
-        lay.addLayout(top)
+        lay.addLayout(buttons)
         lay.addWidget(self.lbl)
         lay.addWidget(self.legend)
         lay.addWidget(self.tbl, 1)
+
+    def set_snapshot_available(self, available: bool):
+        """Кнопка «Со снапшотом» активна только при наличии снапшота у проекта."""
+        self.btn_snapshot.setEnabled(available)
 
     def clear(self):
         self.lbl.setText(tr("diff.hint"))
@@ -95,13 +109,13 @@ class DiffPanel(QWidget):
         for r, f in enumerate(rows):
             name = QTableWidgetItem(f.name)
             name.setData(Qt.ItemDataRole.UserRole, f.key)
-            if f.only_in:                        # флага нет в одном из cfglimits
+            if f.only_in:
                 name.setText(f"{f.name}  ({tr('diff.only_a') if f.only_in == 'a' else tr('diff.only_b')})")
             self.tbl.setItem(r, 0, name)
             self.tbl.setItem(r, 1, _NumItem(f.added, _num(f.added)))
             self.tbl.setItem(r, 2, _NumItem(f.removed, _num(f.removed)))
         self.tbl.setSortingEnabled(True)
-        if not rows:                             # файлы совпали побайтно по смыслу
+        if not rows:
             self.lbl.setText(tr("diff.identical", src=source))
 
     def _on_item(self, it: QTableWidgetItem):

@@ -15,7 +15,6 @@ class TerritoriesItem(QGraphicsItem):
         self._world = world_size
         self._margin = margin
         self._color = QColor(*color)
-        # в сцену: x вправо, север сверху (z=0 = юг -> y = world - z)
         self._cx = margin + np.asarray(x, dtype=np.float64)
         self._cy = margin + (world_size - np.asarray(z, dtype=np.float64))
         self._r = np.asarray(r, dtype=np.float64)
@@ -31,7 +30,7 @@ class TerritoriesItem(QGraphicsItem):
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, _widget=None):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = QPen(self._color, 2)
-        pen.setCosmetic(True)                    # 2 px обводки при любом зуме
+        pen.setCosmetic(True)
         painter.setPen(pen)
         fill = QColor(self._color)
         fill.setAlpha(40)

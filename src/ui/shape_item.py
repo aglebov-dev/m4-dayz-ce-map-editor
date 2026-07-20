@@ -9,9 +9,8 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QGraphicsItem, QStyleOptionGraphicsItem
 
-HANDLE_PX = 8            # сторона ручки на экране
-GRAB_PX = 10             # радиус захвата ручки курсором
-# больше вершин — ручки не рисуем: у лассо их сотни, это была бы каша
+HANDLE_PX = 8
+GRAB_PX = 10
 MAX_HANDLES = 40
 
 
@@ -24,16 +23,15 @@ class ShapeItem(QGraphicsItem):
         self.kind = kind
         self.points = list(points)
         self.building = False
-        self.cursor: QPointF | None = None       # «резиновая» линия при построении
+        self.cursor: QPointF | None = None
         self._world = world_size
         self._margin = margin
-        self.setZValue(55)                       # над оверлеями, под курсором кисти
+        self.setZValue(55)
 
-    # ---------- геометрия ----------
 
     def boundingRect(self) -> QRectF:
         s = self._world + 2 * self._margin
-        return QRectF(0, 0, s, s)                # не мельчим: перерисовка и так редкая
+        return QRectF(0, 0, s, s)
 
     def rect(self) -> QRectF:
         return QRectF(self.points[0], self.points[1]).normalized()
@@ -115,13 +113,12 @@ class ShapeItem(QGraphicsItem):
         return [(p.x() - self._margin, self._world - (p.y() - self._margin))
                 for p in self.points]
 
-    # ---------- отрисовка ----------
 
     def paint(self, painter: QPainter, option: QStyleOptionGraphicsItem, _widget=None):
         lod = option.levelOfDetailFromTransform(painter.worldTransform())
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         pen = QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine)
-        pen.setCosmetic(True)                    # 2 px на экране при любом зуме
+        pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(QColor(255, 255, 255, 40))
         if self.kind == "rect":
@@ -130,14 +127,14 @@ class ShapeItem(QGraphicsItem):
             painter.drawEllipse(self.rect())
         else:
             poly = QPolygonF(self.points)
-            if self.building:                    # ломаная + «резиновая» линия к курсору
+            if self.building:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.drawPolyline(poly)
                 if self.cursor is not None and self.points:
                     painter.drawLine(self.points[-1], self.cursor)
             else:
                 painter.drawPolygon(poly)
-        for h in self.handles():                 # ручки — экранного размера
+        for h in self.handles():
             painter.save()
             painter.translate(h)
             painter.scale(1.0 / lod, 1.0 / lod)

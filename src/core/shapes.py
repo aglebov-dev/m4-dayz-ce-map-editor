@@ -8,7 +8,6 @@ import numpy as np
 
 from core.brush import Patch, plane_array
 
-# полигон тоньше этого (в метрах по узкой стороне bbox) считаем линией, а не фигурой
 MIN_SHAPE_M = 0.5
 
 
@@ -50,7 +49,7 @@ def ellipse_mask(af, x0, z0, x1, z1):
     cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
     rx, rz = abs(x1 - x0) / 2, abs(z1 - z0) / 2
     if rx <= 0 or rz <= 0:
-        return None, 0, 0                        # вырожденный: линия, а не фигура
+        return None, 0, 0
     xs, zs = _cell_centers(af, c0, r0, c1, r1)
     dx = (xs[None, :] - cx) / rx
     dz = (zs[:, None] - cz) / rz
@@ -64,20 +63,20 @@ def polygon_mask(af, points: list[tuple[float, float]]):
     определяем «внутри» по чётности пересечений слева (searchsorted по всей строке
     разом — цикл только по строкам bbox)."""
     if len(points) < 3:
-        return None, 0, 0                        # линия, а не фигура
+        return None, 0, 0
     px = np.array([p[0] for p in points], dtype=np.float64)
     pz = np.array([p[1] for p in points], dtype=np.float64)
     if (px.max() - px.min() < MIN_SHAPE_M) or (pz.max() - pz.min() < MIN_SHAPE_M):
-        return None, 0, 0                        # схлопнутый контур — тоже линия
+        return None, 0, 0
     c0, r0, c1, r1 = _bbox_cells(af, px.min(), pz.min(), px.max(), pz.max())
     if c0 > c1 or r0 > r1:
         return None, 0, 0
     xs, zs = _cell_centers(af, c0, r0, c1, r1)
     x1s, z1s = px, pz
-    x2s, z2s = np.roll(px, -1), np.roll(pz, -1)  # рёбра, включая замыкающее
+    x2s, z2s = np.roll(px, -1), np.roll(pz, -1)
     mask = np.zeros((len(zs), len(xs)), dtype=bool)
     for i, z in enumerate(zs):
-        crosses = (z1s > z) != (z2s > z)         # ребро пересекает строку
+        crosses = (z1s > z) != (z2s > z)
         if not crosses.any():
             continue
         a1z, a2z = z1s[crosses], z2s[crosses]

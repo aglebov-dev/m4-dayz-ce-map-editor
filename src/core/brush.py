@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-MAX_HISTORY = 200                    # шагов undo (мазок = шаг)
+MAX_HISTORY = 200
 
 
 @dataclass
@@ -63,20 +63,20 @@ def stroke(af, key: str, x0: float, z0: float, x1: float, z1: float,
     c0, r0, _, _ = circle_bbox(af, lo_x, lo_z, radius_m)
     _, _, c1, r1 = circle_bbox(af, hi_x, hi_z, radius_m)
     if c0 > c1 or r0 > r1:
-        return None                              # капсула целиком вне карты
+        return None
     arr, bit = plane_array(af, key)
     sub = arr[r0:r1 + 1, c0:c1 + 1]
     before = sub.copy()
     cs = af.cell_size
-    px = (np.arange(c0, c1 + 1) + 0.5) * cs      # центры ячеек, метры
+    px = (np.arange(c0, c1 + 1) + 0.5) * cs
     pz = (np.arange(r0, r1 + 1) + 0.5) * cs
     dx, dz = x1 - x0, z1 - z0
     len2 = dx * dx + dz * dz
     ax = px[None, :] - x0
     az = pz[:, None] - z0
-    if len2 <= 1e-9:                             # вырожденный отрезок = круг
+    if len2 <= 1e-9:
         d2 = ax ** 2 + az ** 2
-    else:                                        # расстояние до отрезка (t зажат в [0,1])
+    else:
         t = np.clip((ax * dx + az * dz) / len2, 0.0, 1.0)
         d2 = (ax - t * dx) ** 2 + (az - t * dz) ** 2
     inside = d2 <= radius_m * radius_m
@@ -86,7 +86,7 @@ def stroke(af, key: str, x0: float, z0: float, x1: float, z1: float,
     else:
         sub[inside] |= mask
     if np.array_equal(before, sub):
-        return None                              # мазок ничего не поменял
+        return None
     return Patch(key, c0, r0, before, sub.copy())
 
 
@@ -137,7 +137,7 @@ class History:
         if not self._redo:
             return None
         step = self._redo.pop()
-        for p in step:                           # накат — в исходном порядке
+        for p in step:
             self._apply(af, p, p.after)
         self._undo.append(step)
         return step

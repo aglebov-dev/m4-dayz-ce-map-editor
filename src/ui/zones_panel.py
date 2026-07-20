@@ -30,7 +30,7 @@ class ZonesPanel(QWidget):
         self.sw = Switch((120, 120, 120), self)
         self.sw.setToolTip(tr("layers.toggle_tip"))
         self.sw.toggled.connect(self._on_switch)
-        self.sw.hide()                           # пока слой не выбран
+        self.sw.hide()
 
         self.lbl = QLabel(tr("zones.hint"))
         self.lbl.setWordWrap(True)

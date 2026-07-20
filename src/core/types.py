@@ -27,7 +27,25 @@ class ItemType:
     usage_mask: int
     value_mask: int
     tags: frozenset[str]
-    source: str          # файл, из которого пришло финальное определение
+    source: str
+
+
+def ce_type_files(core_path: str) -> list[str]:
+    """Относительные пути (folder/name) type-файлов, перечисленных в cfgeconomycore.xml.
+
+    Это доп. типы кастомного сервера (`<ce folder="X"><file name="Y.xml" type="types"/>`).
+    Нужны и для чтения, и для материализации — иначе редактор видит только db/types.xml."""
+    out: list[str] = []
+    try:
+        root = ET.parse(core_path).getroot()
+    except (ET.ParseError, OSError):
+        return out
+    for ce in root.findall(".//ce"):
+        folder = ce.get("folder") or ""
+        for f in ce.findall("file"):
+            if f.get("type") == "types" and f.get("name"):
+                out.append(f"{folder}/{f.get('name')}".strip("/").replace("\\", "/"))
+    return out
 
 
 def _types_files(mission_path: str) -> list[str]:
@@ -37,14 +55,10 @@ def _types_files(mission_path: str) -> list[str]:
         files.append(db)
     core = os.path.join(mission_path, "cfgeconomycore.xml")
     if os.path.isfile(core):
-        root = ET.parse(core).getroot()
-        for ce in root.findall(".//ce"):
-            folder = ce.get("folder") or ""
-            for f in ce.findall("file"):
-                if f.get("type") == "types":
-                    p = os.path.join(mission_path, folder, f.get("name") or "")
-                    if os.path.isfile(p):
-                        files.append(p)
+        for rel in ce_type_files(core):
+            p = os.path.join(mission_path, rel.replace("/", os.sep))
+            if os.path.isfile(p):
+                files.append(p)
     return files
 
 

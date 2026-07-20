@@ -1,11 +1,14 @@
 """Ридер areaflags.map + флаги из cfglimitsdefinition.xml.
 
-Формат и грабли — docs/knowledge.md. Ключевое:
+Формат ОДИН — версий v1/v2 НЕ существует (см. memory areaflags-format). Раскладка:
+[header 24 байта] [usage: uint32/ячейку] [tier: байт/ячейку, либо ниббл при ≤4 values].
+Грабли — docs/knowledge.md. Ключевое:
 - порядок битов = порядок флагов в cfglimitsdefinition.xml ЭТОЙ карты, не хардкодить;
 - row 0 = ЮГ;
-- слой B: байт/ячейку при 5 valueflags, ниббл при ≤4 (младший ниббл = чётная ячейка);
-- «формат v2» (+5851 байт у боевого сервера) — это НЕ формат: файл v1, испорченный текстовой
-  конвертацией CRLF (unix2dos: перед каждым 0x0A вставлен 0x0D). Обращается точно.
+- слой B (tier): байт/ячейку при 5 valueflags, ниббл при ≤4 (младший ниббл = чётная ячейка);
+- «формат v2» (+5851 байт у боевого сервера) — это НЕ версия и НЕ другой формат: тот же файл,
+  испорченный текстовой конвертацией CRLF (unix2dos: перед каждым 0x0A вставлен 0x0D).
+  Снимается точно (_dos2unix); сохранение всегда пишет чистый файл.
 """
 from __future__ import annotations
 
@@ -29,15 +32,13 @@ def read_limits(mission_path: str) -> tuple[list[str], list[str]]:
 class AreaFlags:
     grid_x: int
     grid_y: int
-    size_x: int          # метры
+    size_x: int
     size_y: int
     usages: list[str]
     values: list[str]
-    usage: np.ndarray    # uint32[cells], битмаска usage-флагов
-    tier: np.ndarray     # uint8[cells], битмаска value-флагов
-    repaired_crlf: int = 0   # >0: файл был испорчен unix2dos, убрано столько 0x0D
-    # заголовок как есть (24 байта): 6-е поле = 0 во всех известных картах, назначение
-    # неизвестно — при записи возвращаем его байт в байт, а не собираем заново
+    usage: np.ndarray
+    tier: np.ndarray
+    repaired_crlf: int = 0
     header: np.ndarray | None = None
     source_path: str = ""
     source_mtime: float = 0.0
@@ -114,7 +115,6 @@ def read_areaflags(mission_path: str) -> AreaFlags:
         buf = fixed
 
     off_b = 24 + cells * ubytes
-    # .copy(): frombuffer отдаёт массив только для чтения, а кисть (этап 11) пишет в него
     usage = np.frombuffer(buf[24:off_b].tobytes(), dtype=np.uint32).copy()
     raw_b = buf[off_b:off_b + b_size]
     tier = _expand_nibbles(raw_b, cells) if nibble else raw_b.copy()

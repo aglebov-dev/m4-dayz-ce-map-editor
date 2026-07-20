@@ -18,11 +18,11 @@ class DiffError(Exception):
 
 @dataclass
 class FlagDiff:
-    key: str             # "tier:Tier1" / "usage:Military"
+    key: str
     name: str
-    added: int           # ячеек, где флаг появился (в B есть, в A нет)
-    removed: int         # ячеек, где флаг пропал
-    only_in: str | None  # None — флаг есть в обоих; "a"/"b" — только в одном срезе
+    added: int
+    removed: int
+    only_in: str | None
 
     @property
     def changed(self) -> int:
@@ -32,7 +32,7 @@ class FlagDiff:
 @dataclass
 class MapDiff:
     flags: list[FlagDiff]
-    changed_cells: int           # ячеек, где отличается хоть что-то
+    changed_cells: int
     cells: int
     cell_size: float
     grid_x: int
