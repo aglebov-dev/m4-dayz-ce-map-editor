@@ -1,38 +1,46 @@
-# виртуальное окружение
+# ---- окружение и кэши ----
 .venv/
-
-# кэши Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
 
-# состояние приложения (создаётся само)
+# ---- редакторы и ОС ----
+.idea/
+*.swp
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- данные, которые приложение создаёт само ----
+# appdata: подложки, датасеты зданий, проекты, снапшоты, crash.log
 settings.json
-
-# артефакты смоук-теста
-tools/smoke_*.png
-
-# локальные данные сервера/подложки
+appdata/
 DATA_SAMPLE_SERVER/
 
-# служебные данные приложения (подложки, конфиги проектов, снапшоты)
-appdata/
+# ---- артефакты смоук-тестов ----
+tools/smoke_*.png
 
-# сборка (pyside6-deploy / Nuitka)
+# ---- заметки и документация: держим локально ----
+/docs*/
+
+# ---- сборка (pyside6-deploy / Nuitka) ----
 /dist/
 /src/deployment/
 /src/*.build/
 /src/*.dist/
 /src/*.onefile-build/
 /src/app.exe
-# спека, которую генерит CI из pysidedeploy.spec (абсолютные пути -> пути раннера)
+# ci.spec генерит CI из pysidedeploy.spec: абсолютные пути -> пути раннера
 /src/pysidedeploy.ci.spec
 
-# bundled-ассеты: тайлы подложки и датасеты зданий приложение извлекает из файлов игры
-# само (в appdata/), в git их не держим — иначе клон весит гигабайты, плюс EULA Bohemia.
-# Переводы (assets/i18n) наоборот нужны в репозитории: их бандлит сборка.
+# ---- bundled-ассеты ----
+# Тайлы подложки и датасеты зданий приложение извлекает из файлов игры само (в appdata/),
+# в git их не держим — иначе клон весит гигабайты, плюс EULA Bohemia.
+# Переводы (assets/i18n) наоборот НУЖНЫ в репозитории: их бандлит сборка.
 /assets/tiles/
 /assets/buildings/
 /assets/__tiles/
 /assets/__buildings/
-/docs*
-/docs/**
