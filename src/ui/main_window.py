@@ -642,12 +642,21 @@ class MainWindow(QMainWindow):
 
         Два случая, оба встречались вживую: часть флагов шире ячейки (DeerIsle — 22 флага
         при 16 битах, ванильный halloween.chernarusplus — 17) и слой usage пуст целиком
-        (карта из мода везёт заготовку, зоны рисует владелец сервера)."""
+        (карта из мода везёт заготовку, зоны рисует владелец сервера). Если флаги не влезают,
+        сразу предлагаем расширить ячейку — иначе часть карты просто недоступна для правки."""
         import numpy as np
         from PySide6.QtWidgets import QMessageBox
 
-        lines = []
         blocked = af.unwritable_usages()
+        if blocked and af.usage_bits < 32:
+            answer = QMessageBox.question(
+                self, tr("af.usage_title"),
+                tr("af.widen_ask", bits=af.usage_bits, names=", ".join(blocked)),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes)
+            if answer == QMessageBox.StandardButton.Yes and self._widen_usage(af):
+                blocked = []
+        lines = []
         if blocked:
             lines.append(tr("af.usage_blocked", bits=af.usage_bits,
                             names=", ".join(blocked)))
@@ -655,6 +664,31 @@ class MainWindow(QMainWindow):
             lines.append(tr("af.usage_empty"))
         if lines:
             QMessageBox.information(self, tr("af.usage_title"), "\n\n".join(lines))
+
+    def _widen_usage(self, af) -> bool:
+        """Расширить ячейку usage до 32 бит и переписать файл. True — получилось.
+
+        Пишем через `save_areaflags`: он делает бэкап, заменяет файл атомарно и после
+        записи перечитывает его и сверяет с памятью — разошлось, откат из бэкапа."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from core.areaflags import widen_usage
+        from core.writer import WriteError, save_areaflags
+        try:
+            widen_usage(af, 32)
+            result = save_areaflags(af, backup=True, force=True)
+        except (WriteError, ValueError, OSError) as error:
+            QMessageBox.warning(self, tr("af.usage_title"), tr("af.widen_failed", err=error))
+            return False
+        self._af_orig = (af.usage.copy(), af.tier.copy())    # файл на диске теперь такой
+        self.brush_panel.populate(
+            [(f"tier:{n}", n, self.colors.color(f"tier:{n}")) for n in af.values],
+            [(f"usage:{n}", n, self.colors.color(f"usage:{n}")) for n in af.usages])
+        QMessageBox.information(
+            self, tr("af.usage_title"),
+            tr("af.widen_done", size=f"{result['bytes']:,}".replace(",", " "),
+               backup=os.path.basename(result["backup"]) or "—"))
+        return True
 
     def layer_color(self, key: str) -> tuple[int, int, int]:
         """Совместимость: логика подбора вынесена в common.layer_colors.LayerColors."""

@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import os
+import struct
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
@@ -92,6 +93,29 @@ def _dos2unix(raw: np.ndarray) -> np.ndarray:
     keep = np.ones(raw.size, dtype=bool)
     keep[drop] = False
     return raw[keep]
+
+
+def widen_usage(af: AreaFlags, bits: int = 32) -> None:
+    """Расширить ячейку usage до `bits` бит — чтобы стали доступны все объявленные флаги.
+
+    Меняется только вместимость ячейки: номер бита у флага прежний, нарисованные зоны
+    сохраняются один в один (`0x0041` -> `0x00000041`). Сам файл при сохранении будет
+    ПЕРЕПИСАН с новым шагом, а не перечитан по-другому: правка одного поля заголовка без
+    переписывания данных склеила бы соседние ячейки попарно — размер бы не сошёлся и
+    `read_areaflags` такой файл не принял.
+
+    Раскладка на выходе — та же, что у ванильных миссий с 32-битным usage
+    (chernarusplus, enoch, sakhal), так что формат для игры не новый."""
+    if bits not in (16, 32):
+        raise ValueError(f"ширина {bits} не встречалась; бывают 16 и 32")
+    if bits <= af.usage_bits:
+        raise ValueError(f"ячейка уже {af.usage_bits} бит — сужать нельзя, данные потерялись бы")
+    if af.header is None or af.header.size != 24:
+        raise ValueError("нет исходного заголовка (24 байта)")
+    header = bytearray(af.header.tobytes())
+    struct.pack_into("<I", header, 16, bits)      # поле 5 = бит на ячейку usage
+    af.header = np.frombuffer(bytes(header), dtype=np.uint8).copy()
+    af.usage_bytes = bits // 8
 
 
 def _tier_bits(values: list[str]) -> int:
