@@ -72,9 +72,9 @@ mode = onefile
 # specify any extra nuitka arguments
 #  bundle only the translations (i18n). everything else the app builds into appdata itself = 
 #  the user unpacks satellite tiles and generates building footprints from the game files
-#  (background panel -> unpack). data is PORTABLE: it lands in an "appdata" folder next to
+#  (background panel -> unpack). data is portable = it lands in an "appdata" folder next to
 #  the exe (<exe_dir>/appdata/{tiles,buildings,projects,...}); if that location is read-only
-#  (e.g. Program Files) it falls back to %localappdata%/m4dayzcemapeditor. see core/paths.py.
+#  (e.g. program files) it falls back to %localappdata%/m4dayzcemapeditor. see core/paths.py.
 #  so assets/tiles and assets/buildings are not bundled.
 #  --include-package = paramiko : enables SFTP loading (otherwise the SFTP tab stays disabled).
 #     if the build fails on the 'cryptography' dependency, drop this arg (sftp off, rest works).
