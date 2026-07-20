@@ -26,10 +26,17 @@ $text = Get-Content -Path $source -Raw -Encoding Ascii
 
 # Old repository root, in both slash flavours the spec mixes (icon uses "\", the
 # --include-data-dir argument uses "/"). Any absolute path pointing into the old
-# checkout is rewritten to the same relative place under the new root.
+# checkout is rewritten to the same relative place under the new root -- keeping the
+# slash flavour of the path it replaces. That is not cosmetic: pyside6-deploy splits
+# extra_args with shlex in posix mode, where "\" escapes the next character, so a
+# backslash path there arrives at Nuitka with its separators eaten
+# ("D:\a\repo\assets" -> "D:arepoassets") and the build dies on --include-data-dir.
+$rootForwardSlash = $root -replace '\\', '/'
 $oldRootPattern = '[A-Za-z]:[\\/](?:[^\\/\r\n=]+[\\/])*M4\.DayZ\.CE\.Map\.Editor'
 $text = [System.Text.RegularExpressions.Regex]::Replace(
-    $text, $oldRootPattern, { param($match) $root }, "IgnoreCase")
+    $text, $oldRootPattern,
+    { param($match) if ($match.Value.Contains("/")) { $rootForwardSlash } else { $root } },
+    "IgnoreCase")
 
 # python_path pointed at the developer .venv, which does not exist on the runner.
 $text = [System.Text.RegularExpressions.Regex]::Replace(
@@ -39,6 +46,13 @@ $text = [System.Text.RegularExpressions.Regex]::Replace(
 # to see why a build produced nothing, so drop it.
 $text = [System.Text.RegularExpressions.Regex]::Replace(
     $text, '(?m)^(extra_args\s*=.*?)\s--quiet\b', '$1')
+
+# Fail here, not inside Nuitka a minute later: every --include-data-dir source must exist
+# after the rebase. This is what catches a path mangled by the rewrite.
+foreach ($match in [regex]::Matches($text, '--include-data-dir=([^=\s]+)=')) {
+    $dataDir = $match.Groups[1].Value
+    if (-not (Test-Path $dataDir)) { throw "--include-data-dir points at a missing directory: $dataDir" }
+}
 
 # pyside6-deploy reads the spec as cp1252, so keep the generated file ASCII too.
 [System.IO.File]::WriteAllText($target, $text, [System.Text.Encoding]::ASCII)
