@@ -55,21 +55,37 @@ jobs:
         working-directory: src
         run: |
           New-Item -ItemType Directory -Force -Path ..\dist | Out-Null
-          pyside6-deploy -c pysidedeploy.ci.spec --force --keep-deployment-files
+          pyside6-deploy -c pysidedeploy.ci.spec --force --keep-deployment-files -v
+
+      # Что именно и куда положила сборка — без этого падение на упаковке нечитаемо.
+      - name: Inspect build output
+        if: always()
+        run: |
+          Get-ChildItem -Path dist, src -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+            Select-Object FullName, Length, LastWriteTime | Format-Table -AutoSize | Out-String -Width 200
+          Write-Host "--- dist ---"
+          Get-ChildItem dist -Recurse -ErrorAction SilentlyContinue | Out-String -Width 200
+          Write-Host "--- src (верхний уровень) ---"
+          Get-ChildItem src -ErrorAction SilentlyContinue | Out-String -Width 200
 
       - name: Package
         id: package
         run: |
-          $exe = Join-Path "dist" "$env:APP_NAME.exe"
-          if (-not (Test-Path $exe)) {
-            Get-ChildItem dist -Recurse | Out-String | Write-Host
-            throw "exe not found: $exe"
-          }
+          # Имя exe задаёт title из спеки, но пробелы в нём pyside6-deploy/Nuitka могут
+          # нормализовать по-своему, поэтому ищем по факту: самый свежий exe в dist\,
+          # а если копия туда не доехала -- в src\ (onefile кладёт его рядом с app.py).
+          # Промежуточный standalone-бинарь Nuitka зовётся "_<name>.exe" -- его пропускаем.
+          $candidates = Get-ChildItem -Path dist, src -Filter *.exe -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.Name.StartsWith("_") } |
+            Sort-Object LastWriteTime -Descending
+          if (-not $candidates) { throw "exe not found: сборка ничего не положила ни в dist\, ни в src\" }
+          $exe = $candidates[0].FullName
           $size = [math]::Round((Get-Item $exe).Length / 1MB, 1)
           Write-Host "built: $exe ($size MB)"
           $version = "dev-" + $env:GITHUB_SHA.Substring(0, 7)
           if ($env:GITHUB_REF -like "refs/tags/*") { $version = $env:GITHUB_REF -replace "^refs/tags/", "" }
-          $zip = "dist\$env:APP_NAME $version.zip"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          $zip = Join-Path (Resolve-Path dist) "$env:APP_NAME $version.zip"
           Compress-Archive -Path $exe -DestinationPath $zip -Force
           # Отдаём только сам onefile-exe: рядом Nuitka оставляет промежуточный "_<name>.exe".
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"

@@ -35,6 +35,11 @@ $text = [System.Text.RegularExpressions.Regex]::Replace(
 $text = [System.Text.RegularExpressions.Regex]::Replace(
     $text, '(?m)^python_path\s*=.*$', "python_path = $PythonPath")
 
+# --quiet keeps the local build readable, but on a runner the Nuitka log is the only way
+# to see why a build produced nothing, so drop it.
+$text = [System.Text.RegularExpressions.Regex]::Replace(
+    $text, '(?m)^(extra_args\s*=.*?)\s--quiet\b', '$1')
+
 # pyside6-deploy reads the spec as cp1252, so keep the generated file ASCII too.
 [System.IO.File]::WriteAllText($target, $text, [System.Text.Encoding]::ASCII)
 
