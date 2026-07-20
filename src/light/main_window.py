@@ -398,13 +398,24 @@ class LightMainWindow(MainWindow):
             QMessageBox.warning(self, "Флаг", str(e))
             return
         self._repopulate_layers()
+        # флаг записан в конфиг (движок его увидит), но бита в ячейке ему могло не достаться
         if kind == "usage" and name.strip() in af.unwritable_usages():
-            # флаг в конфиг записан (движок его увидит), но бита в ячейке ему не досталось
+            if af.usage_bits < 32:
+                answer = QMessageBox.question(
+                    self, tr("af.usage_title"),
+                    tr("af.widen_ask", bits=af.usage_bits, names=name.strip()),
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.Yes)
+                if answer == QMessageBox.StandardButton.Yes and self._widen_usage(af):
+                    self._repopulate_layers()
+                    self.statusBar().showMessage(
+                        f"Добавлен usage-флаг «{name.strip()}», ячейка расширена до 32 бит",
+                        8000)
+                    return
             QMessageBox.warning(
                 self, "Флаг",
                 f"Флаг «{name.strip()}» добавлен в cfglimitsdefinition.xml, но ячейка этой "
-                f"карты хранит только {af.usage_bits} бит usage — рисовать его нельзя.\n"
-                f"Нужна пересборка карты в CE Tool.")
+                f"карты хранит только {af.usage_bits} бит usage — рисовать его нельзя.")
             return
         self.statusBar().showMessage(
             f"Добавлен {kind}-флаг «{name.strip()}» (пустой слой — рисуйте кистью)", 8000)
