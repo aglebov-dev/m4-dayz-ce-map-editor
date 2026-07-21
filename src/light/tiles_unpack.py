@@ -70,20 +70,25 @@ def find_tile_pbos(addons_dir: str) -> list[str]:
 _PREFIX_TAIL = {"data", "ce", "world", "worlds", "layers"}
 
 
-def world_name_from_pbo(pbo_path: str) -> str:
-    """Имя мира по PBO: последний осмысленный компонент `prefix` из заголовка.
+def world_from_prefix(prefix: str) -> str:
+    """Имя мира по префиксу PBO: последний осмысленный компонент.
 
     Первый компонент не годится — у модов там бывает пространство имён студии, а не карта.
-    Служебные хвосты (`data`, `ce`, …) отбрасываем. Нет префикса — берём имя файла."""
+    Служебные хвосты (`data`, `ce`, …) отбрасываем. Пустая строка — префикса нет."""
+    parts = [p for p in prefix.replace("/", "\\").split("\\") if p.strip()]
+    while parts and parts[-1].strip().lower() in _PREFIX_TAIL:
+        parts.pop()
+    return parts[-1].strip().lower() if parts else ""
+
+
+def world_name_from_pbo(pbo_path: str) -> str:
+    """То же по пути к PBO. Нет префикса — берём имя файла."""
     try:
         _entries, prefix = pbo.read_header(pbo_path)
     except Exception:
         prefix = ""
-    parts = [p for p in prefix.replace("/", "\\").split("\\") if p.strip()]
-    while parts and parts[-1].strip().lower() in _PREFIX_TAIL:
-        parts.pop()
-    name = parts[-1].strip().lower() if parts else ""
-    return name or os.path.splitext(os.path.basename(pbo_path))[0].lower()
+    return (world_from_prefix(prefix)
+            or os.path.splitext(os.path.basename(pbo_path))[0].lower())
 
 
 def unpack_pbo(pbo_path: str, world: str, world_size: float, log=print) -> str:

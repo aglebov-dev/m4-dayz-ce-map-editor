@@ -112,8 +112,11 @@ class MapFileProjectSource(ProjectSource):
         tiles = map_scan.tile_findings(findings)
         self.pbo_combo.clear()
         for finding in tiles:
-            self.pbo_combo.addItem(tr("src.mapfile_tiles_item", file=finding.name,
-                                      n=finding.tiles), finding.path)
+            # у модов архив почти всегда зовётся data.pbo — различать их можно только по
+            # миру из префикса и по папке, откуда взят
+            self.pbo_combo.addItem(
+                tr("src.mapfile_tiles_item", world=finding.world, n=finding.tiles,
+                   source=finding.source), finding.path)
         self._fill_unpacked(keep_paths=True)
 
         lines = [tr("src.mapfile_found", n=len(tiles)) if tiles else tr("src.mapfile_none")]
@@ -122,7 +125,7 @@ class MapFileProjectSource(ProjectSource):
         if mission:
             for finding in mission[:3]:
                 lines.append(tr("src.mapfile_mission", file=finding.name,
-                                n=len(finding.mission),
+                                source=finding.source, n=len(finding.mission),
                                 files=", ".join(finding.mission[:4])))
         else:
             lines.append(tr("src.mapfile_mission_none"))
@@ -138,11 +141,17 @@ class MapFileProjectSource(ProjectSource):
             self.pbo_combo.setCurrentIndex(0)
 
     def _fill_unpacked(self, keep_paths: bool = False) -> None:
-        """Добавить в список уже распакованные миры — их можно открыть без PBO."""
+        """Добавить в список уже распакованные миры — их можно открыть без PBO.
+
+        Мир, чей архив только что нашёлся сканом, второй раз не показываем: открыть его
+        можно и с той строки, а распаковать заново — только с неё."""
         if not keep_paths:
             self.pbo_combo.clear()
+        listed = {self.pbo_combo.itemData(i) for i in range(self.pbo_combo.count())}
+        listed |= {tiles_unpack.world_name_from_pbo(data) for data in listed
+                   if isinstance(data, str) and os.path.isfile(data)}
         for world in tiles_store.available_worlds():
-            if self.pbo_combo.findData(world) < 0:
+            if world not in listed:
                 self.pbo_combo.addItem(tr("src.mapfile_unpacked_item", world=world), world)
 
     def _on_pbo_selected(self, _index: int) -> None:

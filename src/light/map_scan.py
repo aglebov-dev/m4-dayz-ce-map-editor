@@ -44,6 +44,20 @@ class Finding:
         return os.path.basename(self.path)
 
     @property
+    def world(self) -> str:
+        """Имя мира из префикса — по нему архив и опознаётся: файл почти всегда `data.pbo`."""
+        from light.tiles_unpack import world_from_prefix
+        return world_from_prefix(self.prefix) or os.path.splitext(self.name)[0].lower()
+
+    @property
+    def source(self) -> str:
+        """Откуда архив: имя папки мода (`@DeerIsle …`) либо игры — Addons отбрасываем."""
+        folder = os.path.dirname(self.path)
+        if os.path.basename(folder).lower() == "addons":
+            folder = os.path.dirname(folder)
+        return os.path.basename(folder)
+
+    @property
     def has_areaflags(self) -> bool:
         return "areaflags.map" in self.mission
 

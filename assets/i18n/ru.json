@@ -290,7 +290,7 @@
   "src.mapfile_done_title": "Распаковка завершена",
   "src.mapfile_done": "Мир «{world}» распакован: подложка {size} м, уровней зума {zoom}; здания — {classes} классов с габаритами.",
   "src.mapfile_no_buildings": "Здания не собраны: {err}",
-  "src.mapfile_tiles_item": "{file} — тайлов {n}",
-  "src.mapfile_mission": "Файлы миссии: {file} — {n} шт ({files}…)",
+  "src.mapfile_tiles_item": "{world} — {n} тайлов · {source}",
+  "src.mapfile_mission": "Файлы миссии: {file} ({source}) — {n} шт: {files}…",
   "src.mapfile_mission_none": "Файлов миссии (areaflags.map, экономика) в архивах нет — их держит владелец сервера."
 }
