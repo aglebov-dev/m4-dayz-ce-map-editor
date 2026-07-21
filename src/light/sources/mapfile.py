@@ -183,15 +183,15 @@ class MapFileProjectSource(ProjectSource):
 
 
 def create_map_project(pbo_path: str, world: str) -> P.Project:
-    """Проект-просмотрщик: ни миссии, ни файлов — одна подложка.
+    """Просмотр карты: ни миссии, ни файлов — одна ссылка на распакованную пирамиду.
 
-    `provider_cfg` помнит PBO (если он известен), чтобы потом можно было распаковать заново."""
-    project = P.Project(
-        id=P.new_id(world),
+    НЕ сохраняется: папки в appdata/projects не появляется и в списке недавних этого нет.
+    Хранить нечего — всё содержимое уже лежит в appdata/tiles/<world>, а «проект» тут
+    только чтобы редактор понимал, что открывать (см. `Project.is_map_only`)."""
+    return P.Project(
+        id=world,
         name=world,
         provider_cfg={"kind": "pbo", "pbo": os.path.abspath(pbo_path) if pbo_path else ""},
         mission_name="",
         files={},
         background=f"tiles:{world}")
-    project.save()
-    return project

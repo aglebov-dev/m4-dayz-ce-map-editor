@@ -104,6 +104,21 @@ class Project:
     def has_snapshot(self) -> bool:
         return os.path.isdir(self.snapshot_dir) and bool(os.listdir(self.snapshot_dir))
 
+    @property
+    def is_map_only(self) -> bool:
+        """Просмотр карты без миссии: есть подложка, но нет ни миссии, ни файлов.
+
+        Такой «проект» не сохраняется на диск — папки в appdata/projects у него нет, и в
+        списке недавних он не появляется. Живёт только пока открыт, потому что всё его
+        содержимое — ссылка на распакованную пирамиду тайлов."""
+        return not self.mission_name and self.background.startswith("tiles:")
+
+    @property
+    def tiles_dir(self) -> Path:
+        """Папка пирамиды тайлов (для кнопки «Папка» в режиме просмотра)."""
+        world = self.background.split(":", 1)[1] if ":" in self.background else ""
+        return paths.tiles_cache / world
+
 
 def _safe_provider(cfg: dict) -> dict:
     """Пароль SFTP в конфиг не пишем — только способ входа."""

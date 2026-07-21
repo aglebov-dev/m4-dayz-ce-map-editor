@@ -241,11 +241,14 @@ class LightMainWindow(MainWindow):
         (редактор показывать не нужно, сообщение уже показано)."""
         self._save_project_layout()              # раскладку ТЕКУЩЕГО проекта — перед сменой
         self.project = proj
+        if proj.is_map_only:
+            # просмотр карты: ни миссии, ни папки проекта — сразу к подложке, минуя
+            # load_workdir (он полез бы в appdata/projects и создал бы пустую папку)
+            self.areaflags = None
+            return self._open_map_only(proj)
         # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/).
         # silent: своё понятное сообщение покажем ниже, без «миссии не найдены».
         self.load_workdir(proj.workdir, proj.mission_name, silent=True)
-        if self.areaflags is None and self._open_map_only(proj):
-            return True                          # проект-просмотрщик: подложка без миссии
         if self.areaflags is None:
             QMessageBox.warning(
                 self, "Загрузка проекта",
@@ -284,6 +287,9 @@ class LightMainWindow(MainWindow):
         world = background.split(":", 1)[1]
         meta = tiles_store.find(world)
         if not meta:
+            QMessageBox.warning(self, "Загрузка карты",
+                                f"Пирамида тайлов «{world}» не найдена — распакуйте карту заново.")
+            self.project = None
             return False
         mission = Mission(name=world, path="", world=world,
                           world_size=int(meta.world_size), has_areaflags=False)
@@ -301,8 +307,8 @@ class LightMainWindow(MainWindow):
 
     def _save_project_layout(self):
         """Сохранить раскладку панелей текущего проекта (в его layout.json)."""
-        if not self.project:
-            return
+        if not self.project or self.project.is_map_only:
+            return                               # у просмотра карты нет папки — и хранить негде
         try:
             state = bytes(self.saveState().toBase64()).decode()
             P.save_layout(self.project, state)
@@ -313,6 +319,8 @@ class LightMainWindow(MainWindow):
         """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков)."""
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
             return
+        if self.project and self.project.is_map_only:
+            return                               # см. _save_project_layout
         state = P.load_layout(self.project) if self.project else None
         if not state:
             return                               # нет своей раскладки — оставляем как есть
@@ -353,10 +361,12 @@ class LightMainWindow(MainWindow):
         self.open_project(self.project)          # перечитывает data/ проекта
 
     def open_map_folder(self):
-        """Открыть в проводнике папку с файлами текущей карты (data/ проекта)."""
+        """Открыть в проводнике папку карты: файлы миссии, а в режиме просмотра — тайлы
+        (миссии там нет, зато есть распакованная пирамида)."""
         if not self.project:
             return
-        path = str(self.project.mission_dir)
+        path = str(self.project.tiles_dir if self.project.is_map_only
+                   else self.project.mission_dir)
         if os.path.isdir(path):
             QDesktopServices.openUrl(QUrl.fromLocalFile(path))
 
