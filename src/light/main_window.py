@@ -392,10 +392,15 @@ class LightMainWindow(MainWindow):
         self.open_project(self.project)
 
     def load_background(self, m):
-        """Подложка: тайлы, ВЫБРАННЫЕ пользователем (мир из project.background), но только
-        если размер их мира совпадает с текущей картой — иначе смена карты грузила бы
-        чужую подложку и ломала масштаб. Имя мира миссии (m.world) для поиска не годится:
-        у миссии-в-корне оно берётся из имени папки (DATA_SAMPLE≠chernarusplus)."""
+        """Подложка: тайлы, ВЫБРАННЫЕ пользователем (мир из project.background).
+
+        Размер мира берём из areaflags — он истина, а у пирамиды он лишь оценён по сетке
+        тайлов. Подложку натягиваем на этот размер (`TileMeta.fitted_to`), поэтому годится
+        любая пирамида: и своя с погрешностью оценки в пару сотен метров, и чужая — если
+        владелец сознательно подложил карту другого мира.
+
+        Имя мира миссии (m.world) для поиска пирамиды не годится: у миссии-в-корне оно
+        берётся из имени папки (DATA_SAMPLE≠chernarusplus)."""
         from light import tiles_store
         proj = getattr(self, "project", None)    # super().__init__ может звать до нас
         bg = proj.background if proj else ""
@@ -406,9 +411,12 @@ class LightMainWindow(MainWindow):
         if bg.startswith("tiles"):
             world = bg.split(":", 1)[1] if ":" in bg else m.world
             meta = tiles_store.find(world)
-            if meta and abs(meta.world_size - m.world_size) < 1:   # тайлы того же мира
-                self.view.load_tiles(meta)
-                self.lbl_bg.setText(f"подложка: тайлы {world}")
+            if meta:
+                fitted = meta.fitted_to(m.world_size)
+                self.view.load_tiles(fitted)
+                note = ("" if fitted.stretch == meta.stretch
+                        else f" (растянута с {meta.world_size} м)")
+                self.lbl_bg.setText(f"подложка: тайлы {world}{note}")
                 return
         elif bg.startswith("image:"):
             path = bg.split(":", 1)[1]

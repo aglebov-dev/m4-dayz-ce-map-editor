@@ -533,7 +533,8 @@ class MainWindow(QMainWindow):
         # 1) спутниковые тайлы
         meta = find_tiles(paths.assets_tiles, m.world)
         if meta:
-            self.view.load_tiles(meta)
+            # размер мира знает areaflags; у пирамиды он оценён — натягиваем на карту
+            self.view.load_tiles(meta.fitted_to(m.world_size))
             self.lbl_bg.setText(tr("bg.tiles", world=m.world, max=meta.max_zoom))
             return
         # 2) сохранённый выбор пользователя
