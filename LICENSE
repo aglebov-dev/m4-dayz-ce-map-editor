@@ -1,0 +1,114 @@
+M4 DayZ CE Map Editor
+Copyright (c) 2026 aglebov (aglebov.dev@gmail.com). Все права защищены.
+
+Это НЕ open-source лицензия. Исходный код открыт для чтения, но никаких прав на его
+использование, кроме перечисленных ниже, не передаётся.
+
+
+1. ЧТО РАЗРЕШЕНО
+
+1.1. Читать и изучать исходный код.
+1.2. Использовать программу — как готовую сборку, так и собранную из этого исходника
+     самостоятельно — в личных, некоммерческих целях.
+1.3. Хранить локальную копию репозитория для целей п. 1.1–1.2.
+
+
+2. ЧТО ЗАПРЕЩЕНО без письменного разрешения правообладателя
+
+2.1. Любое коммерческое использование: продажа, сдача в аренду, оказание платных услуг
+     с применением программы, использование в составе платного продукта или сервиса.
+2.2. Распространение программы, её сборок и исходного кода, полностью или частично,
+     включая публикацию в других репозиториях, файлообменниках и сборниках модов.
+2.3. Копирование частей исходного кода в другие проекты.
+2.4. Изменение, декомпиляция, обратная разработка, создание производных работ.
+2.5. Удаление или изменение сведений об авторстве и настоящей лицензии.
+2.6. Любое использование, нарушающее применимое законодательство, а равно нарушающее
+     пользовательские соглашения Bohemia Interactive или иных правообладателей.
+
+
+3. КОМПОНЕНТЫ ТРЕТЬИХ ЛИЦ
+
+Программа использует сторонние библиотеки, распространяемые на собственных условиях
+(см. THIRD-PARTY-NOTICES.md). На эти компоненты ограничения раздела 2 НЕ
+распространяются: их использование, изменение и распространение регулируются
+исключительно их собственными лицензиями, и в части противоречия эти лицензии имеют
+преимущественную силу.
+
+В частности, PySide6 и paramiko распространяются на условиях LGPL. Это означает, что
+получатель сборки вправе заменять эти библиотеки собственными версиями и совершать
+действия, необходимые для такой замены, — раздел 2 этому не препятствует.
+
+
+4. ДАННЫЕ ИГРЫ
+
+Программа читает файлы игры DayZ и создаёт из них производные данные (тайлы подложки,
+датасеты зданий). Права на исходные игровые ассеты принадлежат Bohemia Interactive a.s.
+Настоящая лицензия никаких прав на них не передаёт и не разрешает их распространение.
+Ответственность за соблюдение условий Bohemia Interactive несёт пользователь.
+
+
+5. ОТСУТСТВИЕ ГАРАНТИЙ
+
+ПРОГРАММА ПРЕДОСТАВЛЯЕТСЯ «КАК ЕСТЬ», БЕЗ КАКИХ-ЛИБО ГАРАНТИЙ, ЯВНЫХ ИЛИ
+ПОДРАЗУМЕВАЕМЫХ, ВКЛЮЧАЯ ГАРАНТИИ ПРИГОДНОСТИ ДЛЯ КОНКРЕТНЫХ ЦЕЛЕЙ, КОРРЕКТНОСТИ
+РЕЗУЛЬТАТОВ И ОТСУТСТВИЯ ОШИБОК.
+
+
+6. ОГРАНИЧЕНИЕ ОТВЕТСТВЕННОСТИ
+
+ПРАВООБЛАДАТЕЛЬ НИ ПРИ КАКИХ ОБСТОЯТЕЛЬСТВАХ НЕ НЕСЁТ ОТВЕТСТВЕННОСТИ ЗА ЛЮБОЙ ВРЕД,
+ПРЯМОЙ ИЛИ КОСВЕННЫЙ, ВОЗНИКШИЙ В СВЯЗИ С ИСПОЛЬЗОВАНИЕМ ИЛИ НЕВОЗМОЖНОСТЬЮ
+ИСПОЛЬЗОВАНИЯ ПРОГРАММЫ, В ТОМ ЧИСЛЕ ЗА ПОВРЕЖДЕНИЕ ИЛИ УТРАТУ ФАЙЛОВ МИССИИ
+(включая areaflags.map и файлы экономики), ПРОСТОЙ ИГРОВОГО СЕРВЕРА, ПОТЕРЮ ИГРОВОГО
+ПРОГРЕССА ИЛИ ДАННЫХ, УПУЩЕННУЮ ВЫГОДУ.
+
+Программа изменяет файлы, которые читает игровой сервер. ПЕРЕД ЛЮБОЙ ЗАПИСЬЮ ДЕЛАЙТЕ
+РЕЗЕРВНЫЕ КОПИИ. Встроенное резервное копирование не отменяет этой обязанности.
+
+
+7. ИНЫЕ УСЛОВИЯ
+
+За разрешением на использование, выходящее за рамки раздела 1, обращайтесь к
+правообладателю: aglebov.dev@gmail.com
+
+
+--------------------------------------------------------------------------------
+ENGLISH TRANSLATION (for convenience; the Russian text above prevails)
+
+M4 DayZ CE Map Editor
+Copyright (c) 2026 aglebov (aglebov.dev@gmail.com). All rights reserved.
+
+This is NOT an open-source licence. The source is published for reading only; no
+rights beyond those listed below are granted.
+
+1. PERMITTED. Reading and studying the source; using the program, whether a released
+   build or one you build yourself from this source, for personal, non-commercial
+   purposes; keeping a local copy of the repository for those purposes.
+
+2. PROHIBITED without the copyright holder's written permission: any commercial use;
+   redistribution of the program, its builds or its source, in whole or in part;
+   copying parts of the source into other projects; modification, decompilation,
+   reverse engineering, or derivative works; removing or altering authorship and
+   licence notices; any use that breaks applicable law or the terms of Bohemia
+   Interactive or other rights holders.
+
+3. THIRD-PARTY COMPONENTS. The program uses third-party libraries under their own
+   terms (see THIRD-PARTY-NOTICES.md). Section 2 does NOT apply to them; where the
+   licences conflict, theirs prevail. In particular PySide6 and paramiko are LGPL:
+   a recipient of a build may replace those libraries with their own versions and do
+   whatever that replacement requires, and Section 2 does not stand in the way.
+
+4. GAME DATA. The program reads DayZ game files and derives data from them (tile
+   pyramids, building datasets). The original assets belong to Bohemia Interactive
+   a.s. This licence grants no rights to them and does not permit their distribution.
+
+5. NO WARRANTY. The program is provided "AS IS", without warranty of any kind.
+
+6. LIMITATION OF LIABILITY. The copyright holder is not liable for any damage,
+   direct or indirect, arising from use of or inability to use the program,
+   including corruption or loss of mission files (areaflags.map, economy files),
+   game server downtime, loss of game progress or data, or lost profits. The program
+   writes files a live server reads: BACK THEM UP BEFORE WRITING. The built-in backup
+   does not relieve you of that.
+
+7. OTHER TERMS. For permissions beyond Section 1, contact aglebov.dev@gmail.com
