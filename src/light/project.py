@@ -11,6 +11,7 @@ import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from core import layout_guard
 from core.paths import paths
 from light.providers import DataProvider, make_provider
 
@@ -131,18 +132,34 @@ def save_layout(project: "Project", state_b64: str) -> None:
     """Раскладка панелей (dock state, base64 от QMainWindow.saveState) — своя у каждого
     проекта. Хранится в `<project>/layout.json`, отдельно от config (данных проекта)."""
     with open(project.dir / "layout.json", "w", encoding="utf-8") as file:
-        json.dump({"state": state_b64}, file)
+        json.dump({"state": state_b64, "version": layout_guard.LAYOUT_VERSION}, file)
 
 
 def load_layout(project: "Project") -> str | None:
-    """Сохранённая раскладка панелей проекта (base64) или None."""
+    """Сохранённая раскладка панелей проекта (base64) или None.
+
+    Состояния прежних версий не читаем: они сохранялись, когда у тулбаров не было
+    objectName, и Qt писал их неполными (см. `core.layout_guard`)."""
     path = project.dir / "layout.json"
     if path.is_file():
         try:
-            return json.loads(path.read_text(encoding="utf-8")).get("state")
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("version") != layout_guard.LAYOUT_VERSION:
+                return None
+            return data.get("state")
         except Exception:
             return None
     return None
+
+
+def forget_layout(project: "Project | None") -> None:
+    """Выбросить сохранённую раскладку проекта (она уронила прошлый запуск)."""
+    if project is None:
+        return
+    try:
+        (project.dir / "layout.json").unlink(missing_ok=True)
+    except Exception:
+        pass
 
 
 def new_id(name: str) -> str:

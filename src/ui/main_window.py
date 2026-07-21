@@ -25,6 +25,7 @@ from core.export import mask_rgba
 from core.groups import read_buildings
 from core.shapes import fill_ellipse, fill_polygon, fill_rect
 from core.i18n import tr
+from core import layout_guard
 from core.tiles import find_tiles
 from core.types import instances_for_item, items_for_building, read_types
 
@@ -90,6 +91,7 @@ class MainWindow(QMainWindow):
         self.areaflags = None
 
         tb = QToolBar("Основное")
+        tb.setObjectName("toolbar_main")          # без имени Qt не сохраняет тулбар в раскладку
         tb.setMovable(False)
         self.addToolBar(tb)
 
@@ -278,6 +280,7 @@ class MainWindow(QMainWindow):
         # сжиматься; FlowLayout-хост фиксировал ширину/высоту и ломал ресайз).
         self.addToolBarBreak()
         self.tb_tools = QToolBar("tools")
+        self.tb_tools.setObjectName("toolbar_tools")
         self.tb_tools.setMovable(False)
         self.addToolBar(self.tb_tools)
         for dock in (self.dock_layers, self.dock_buildings,
@@ -340,12 +343,25 @@ class MainWindow(QMainWindow):
     def _restore_ui_state(self):
         """Раскладка прошлого запуска; не восстановилась — все панели выключены.
         В offscreen-тестах не применяется (детерминизм смоуков)."""
+        self._layout_unsafe = False              # см. light: проектную тоже не применяем
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
+            return
+        if layout_guard.restore_is_unsafe():
+            # прошлый запуск умер, не показав окна. Раскладка -- единственное, что мы
+            # применяем до показа, поэтому подозреваемая одна: выбрасываем и стартуем чисто
+            self._layout_unsafe = True
+            self._forget_ui_state()
+            layout_guard.restore_succeeded()
+            self.statusBar().showMessage(tr("layout.reset"), 12000)
             return
         st = self.settings.data.get("ui_state")
         if not st:
             return                               # первый запуск — компоновка по умолчанию
+        if self.settings.data.get("ui_state_version") != layout_guard.LAYOUT_VERSION:
+            self._forget_ui_state()              # состояние прежнего формата — неполное
+            return
         from PySide6.QtCore import QByteArray
+        layout_guard.begin_restore()             # снимем метку, когда окно покажется
         try:
             geo = self.settings.data.get("ui_geometry")
             if geo:
@@ -357,11 +373,22 @@ class MainWindow(QMainWindow):
             for d in self._docks.values():
                 d.close()
 
+    def _forget_ui_state(self):
+        """Забыть сохранённую раскладку: она либо негодна, либо прежнего формата."""
+        for key in ("ui_state", "ui_geometry", "ui_state_version"):
+            self.settings.data.pop(key, None)
+        try:
+            self.settings.save()
+        except Exception:
+            pass
+
     def showEvent(self, ev):
         """Карта грузится в конструкторе — там панели ещё невидимы, и сводка осталась
         отложенной. visibilityChanged при показе ОКНА не приходит, так что досчитываем
         здесь, иначе таблица стояла бы пустой до первого клика по вкладке."""
         super().showEvent(ev)
+        # окно дожило до показа -> раскладка безопасна (метку ставил _restore_ui_state)
+        QTimer.singleShot(0, layout_guard.restore_succeeded)
         QTimer.singleShot(0, lambda: self._stats_dirty and self.refresh_stats(now=True))
 
     def closeEvent(self, ev):
@@ -378,6 +405,7 @@ class MainWindow(QMainWindow):
                 self.saveState().toBase64()).decode()
             self.settings.data["ui_geometry"] = bytes(
                 self.saveGeometry().toBase64()).decode()
+            self.settings.data["ui_state_version"] = layout_guard.LAYOUT_VERSION
             self.settings.save()
         except Exception:
             pass

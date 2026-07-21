@@ -292,5 +292,6 @@
   "src.mapfile_no_buildings": "Здания не собраны: {err}",
   "src.mapfile_tiles_item": "{world} — {n} тайлов · {source}",
   "src.mapfile_mission": "Файлы миссии: {file} ({source}) — {n} шт: {files}…",
-  "src.mapfile_mission_none": "Файлов миссии (areaflags.map, экономика) в архивах нет — их держит владелец сервера."
+  "src.mapfile_mission_none": "Файлов миссии (areaflags.map, экономика) в архивах нет — их держит владелец сервера.",
+  "layout.reset": "Сохранённая раскладка панелей уронила прошлый запуск — она сброшена, панели расставлены по умолчанию."
 }

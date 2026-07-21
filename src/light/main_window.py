@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QFileDialog, QInputDialog, QMessageBox, QToolButto
 from PySide6.QtGui import QDesktopServices, QIcon
 
 from core.building_index import load_index
+from core import layout_guard
 from core.i18n import tr
 from core.flags import (
     FlagError, add_usage, add_value, remove_usage, remove_value, write_cfglimits,
@@ -316,19 +317,31 @@ class LightMainWindow(MainWindow):
             pass
 
     def _restore_project_layout(self):
-        """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков)."""
+        """Восстановить раскладку панелей проекта. В offscreen пропускаем (детерминизм смоуков).
+
+        Если прошлый запуск не пережил восстановление раскладки (`core.layout_guard`), то
+        проектную не применяем и стираем: подозреваемых всего два — она и глобальная."""
         if os.environ.get("QT_QPA_PLATFORM") == "offscreen":
             return
         if self.project and self.project.is_map_only:
             return                               # см. _save_project_layout
+        if getattr(self, "_layout_unsafe", False):
+            P.forget_layout(self.project)
+            return
         state = P.load_layout(self.project) if self.project else None
         if not state:
             return                               # нет своей раскладки — оставляем как есть
         from PySide6.QtCore import QByteArray
+        from PySide6.QtCore import QTimer
+        layout_guard.begin_restore()
         try:
             self.restoreState(QByteArray.fromBase64(state.encode()))
         except Exception:
             pass
+        # метку снимаем из цикла событий: до show() он ещё не крутится, значит крах внутри
+        # show() метку застанет. Проект открывают и из уже показанного окна — там сработает
+        # сразу, но всё равно ПОСЛЕ того, как раскладка улеглась.
+        QTimer.singleShot(0, layout_guard.restore_succeeded)
 
     def closeEvent(self, ev):
         self._save_project_layout()              # раскладку проекта — при выходе
