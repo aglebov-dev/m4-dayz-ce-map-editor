@@ -42,19 +42,28 @@ def rect_mask(af, x0, z0, x1, z1):
     return inside_z[:, None] & inside_x[None, :], c0, r0
 
 
-def ellipse_mask(af, x0, z0, x1, z1):
-    """(маска, c0, r0) эллипса, вписанного в прямоугольник растяжки."""
-    c0, r0, c1, r1 = _bbox_cells(af, x0, z0, x1, z1)
-    if c0 > c1 or r0 > r1:
-        return None, 0, 0
+def ellipse_mask(af, x0, z0, x1, z1, angle: float = 0.0):
+    """(маска, c0, r0) эллипса, вписанного в прямоугольник растяжки.
+
+    angle — поворот вокруг центра, радианы против часовой в МИРОВЫХ осях (x на восток,
+    z на север). Прямоугольник (x0,z0)-(x1,z1) задаёт полуоси до поворота."""
     cx, cz = (x0 + x1) / 2, (z0 + z1) / 2
     rx, rz = abs(x1 - x0) / 2, abs(z1 - z0) / 2
     if rx <= 0 or rz <= 0:
         return None, 0, 0                        # вырожденный: линия, а не фигура
+    cos_a, sin_a = np.cos(angle), np.sin(angle)
+    # габариты повёрнутого эллипса: по ним берём ячейки, иначе углы фигуры срежутся
+    half_x = np.hypot(rx * cos_a, rz * sin_a)
+    half_z = np.hypot(rx * sin_a, rz * cos_a)
+    c0, r0, c1, r1 = _bbox_cells(af, cx - half_x, cz - half_z, cx + half_x, cz + half_z)
+    if c0 > c1 or r0 > r1:
+        return None, 0, 0
     xs, zs = _cell_centers(af, c0, r0, c1, r1)
-    dx = (xs[None, :] - cx) / rx
-    dz = (zs[:, None] - cz) / rz
-    return (dx * dx + dz * dz) <= 1.0, c0, r0
+    dx = xs[None, :] - cx
+    dz = zs[:, None] - cz
+    along = (dx * cos_a + dz * sin_a) / rx        # координаты в осях самого эллипса
+    across = (-dx * sin_a + dz * cos_a) / rz
+    return (along * along + across * across) <= 1.0, c0, r0
 
 
 def polygon_mask(af, points: list[tuple[float, float]]):
@@ -111,8 +120,8 @@ def fill_rect(af, key, x0, z0, x1, z1, erase=False) -> Patch | None:
     return fill(af, key, *rect_mask(af, x0, z0, x1, z1), erase=erase)
 
 
-def fill_ellipse(af, key, x0, z0, x1, z1, erase=False) -> Patch | None:
-    return fill(af, key, *ellipse_mask(af, x0, z0, x1, z1), erase=erase)
+def fill_ellipse(af, key, x0, z0, x1, z1, angle: float = 0.0, erase=False) -> Patch | None:
+    return fill(af, key, *ellipse_mask(af, x0, z0, x1, z1, angle), erase=erase)
 
 
 def fill_polygon(af, key, points, erase=False) -> Patch | None:

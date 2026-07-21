@@ -40,7 +40,8 @@ class MapView(QGraphicsView):
     stroke_started = Signal()               # ЛКМ нажата в режиме кисти
     paint_world = Signal(float, float)      # мазок кисти в мировой точке
     stroke_finished = Signal()              # ЛКМ отпущена — мазок закончен
-    shape_committed = Signal(str, list)     # (kind, точки в мировых метрах) — залить
+    # (kind, точки в мировых метрах, угол поворота в радианах) — залить
+    shape_committed = Signal(str, list, float)
     shape_state = Signal(bool)              # есть ли контур, который можно применить
     erase_toggle_requested = Signal()       # Tab в режиме кисти — переключить кисть/ластик
 
@@ -377,7 +378,7 @@ class MapView(QGraphicsView):
         s = self._shape
         if not s or s.building or s.is_degenerate():
             return
-        self.shape_committed.emit(s.kind, s.world_points())
+        self.shape_committed.emit(*s.commit_payload())
         self.cancel_shape()
 
     def has_shape(self) -> bool:
@@ -800,7 +801,8 @@ class MapView(QGraphicsView):
             self._lpan_last = self._pan_by(ev.position().toPoint(), self._lpan_last)
             return
         if self._brush_mode and self._tool != "brush":
-            if self._shape_move(sp):
+            snap = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if self._shape_move(sp, snap):       # Shift — привязка угла к шагу
                 return
         elif self._brush_mode:
             self._update_brush_cursor(sp)
@@ -839,16 +841,47 @@ class MapView(QGraphicsView):
             return
         super().mousePressEvent(ev)
 
+    def mouseDoubleClickEvent(self, ev):
+        """Двойной клик в режиме фигур: по вершине полигона — удалить её; по строящемуся
+        контуру — замкнуть его (иначе тот же клик просто задваивал бы вершину)."""
+        if (ev.button() != Qt.MouseButton.LeftButton or not self._brush_mode
+                or self._tool == "brush" or not self._shape):
+            super().mouseDoubleClickEvent(ev)
+            return
+        s, sp = self._shape, self.mapToScene(ev.position().toPoint())
+        self._drag_handle = -1                   # первый клик пары успел взяться за ручку
+        self._drag_from = None
+        if s.building:
+            if len(s.points) >= 3:
+                s.building = False
+                s.cursor = None
+                s.update()
+                self.shape_state.emit(self.has_shape())
+            return
+        i = s.handle_at(sp, self._lod())
+        if 0 <= i < s.rotate_index():
+            s.remove_point(i)
+            self.shape_state.emit(self.has_shape())
+
     def _lod(self) -> float:
         return self.transform().m11()
 
     def _shape_press(self, sp):
-        """ЛКМ в режиме фигур: ручка → тянем её; внутри → двигаем фигуру; иначе — новая."""
+        """ЛКМ в режиме фигур: ручка → тянем её; ребро полигона → новая вершина;
+        внутри → двигаем фигуру; иначе — новая фигура."""
         s = self._shape
         if s and not s.building:
             i = s.handle_at(sp, self._lod())
+            if i == s.rotate_index():            # жёлтый кружок над фигурой — поворот
+                s.begin_rotate(sp)
+                self._drag_handle = -3
+                return
             if i >= 0:
                 self._drag_handle = i
+                return
+            edge = s.edge_at(sp, self._lod())    # клик по ребру = вставить вершину и тянуть
+            if edge >= 0:
+                self._drag_handle = s.insert_point(edge, sp)
                 return
             if s.contains_point(sp):
                 self._drag_from = sp
@@ -878,11 +911,14 @@ class MapView(QGraphicsView):
         self._new_shape(self._tool, [sp, sp])    # rect / ellipse: тянем второй угол
         self._drag_handle = 4                    # правый-нижний угол
 
-    def _shape_move(self, sp) -> bool:
+    def _shape_move(self, sp, snap: bool = False) -> bool:
         """True — событие съедено (идёт правка контура)."""
         s = self._shape
         if not s:
             return False
+        if self._drag_handle == -3:              # -3: тянем ручку поворота
+            s.rotate_to(sp, snap)
+            return True
         if self._drag_handle == -2:              # лассо: копим точки траектории
             if not s.points or (abs(sp.x() - s.points[-1].x())
                                 + abs(sp.y() - s.points[-1].y())) > 2.0 / max(
@@ -909,6 +945,7 @@ class MapView(QGraphicsView):
             s.building = False
             s.cursor = None
             s.update()
+        s.end_rotate()
         self._drag_handle = -1
         self._drag_from = None
         self.shape_state.emit(self.has_shape())

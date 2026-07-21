@@ -794,9 +794,11 @@ class MainWindow(QMainWindow):
         for p in patches:
             self._repaint_patch(p.key, p.col0, p.row0, p.before.shape)
 
-    def on_shape_committed(self, kind: str, points: list):
+    def on_shape_committed(self, kind: str, points: list, angle: float = 0.0):
         """Пробел по контуру: заливка фигуры = один шаг истории, как мазок кисти.
-        В режиме «Замена» той же фигурой стираем прочие включённые слои (см. on_paint)."""
+        В режиме «Замена» той же фигурой стираем прочие включённые слои (см. on_paint).
+        angle (радианы) осмыслен только для эллипса: повёрнутый прямоугольник приходит
+        сюда уже полигоном из четырёх углов (см. `ShapeItem.commit_payload`)."""
         af, key = self.areaflags, self.brush_panel.layer_key()
         if not af or not key:
             return
@@ -805,8 +807,9 @@ class MainWindow(QMainWindow):
             if kind == "polygon":
                 return fill_polygon(af, layer_key, points, erase=erase)
             (x0, z0), (x1, z1) = points[0], points[1]
-            fn = fill_ellipse if kind == "ellipse" else fill_rect
-            return fn(af, layer_key, x0, z0, x1, z1, erase=erase)
+            if kind == "ellipse":
+                return fill_ellipse(af, layer_key, x0, z0, x1, z1, angle, erase=erase)
+            return fill_rect(af, layer_key, x0, z0, x1, z1, erase=erase)
 
         patches = [apply(key, self._erase)]
         patches += [apply(other, True) for other in self._replace_targets(key)]
