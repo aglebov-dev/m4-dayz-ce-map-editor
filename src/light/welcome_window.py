@@ -21,7 +21,9 @@ from core.i18n import tr
 from light.sources import SOURCES
 from light.sources.base import Availability, ProjectSource
 
-_CARD_WIDTH = 720
+# Ширина карточки: должно хватать на ВСЕ вкладки источников в один ряд — иначе QTabWidget
+# прячет их за стрелками прокрутки, и пятая вкладка («Карта из PBO») становится невидимкой.
+_CARD_WIDTH = 900
 
 
 class WelcomeWindow(QDialog):
@@ -32,7 +34,7 @@ class WelcomeWindow(QDialog):
                  settings=None):
         super().__init__(parent)
         self.setWindowTitle("M4 DayZ CE Map Editor")
-        self.resize(900, 640)
+        self.resize(_CARD_WIDTH + 180, 640)      # + поля, чтобы карточка не липла к краям
         self.result_project = None
         self.relaunch = False
         self._settings = settings                # для смены языка (может быть None)

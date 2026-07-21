@@ -63,15 +63,27 @@ def find_tile_pbos(addons_dir: str) -> list[str]:
     return [p for p in sorted(glob.glob(os.path.join(addons_dir, "*.pbo"))) if has_tiles(p)]
 
 
+#     префикс                          -> мир
+#     deerisle\data                    -> deerisle
+#     H2A\GreenCounty\data             -> greencounty   (H2A — пространство имён мода)
+#     DZ\worlds\chernarusplus\data     -> chernarusplus
+_PREFIX_TAIL = {"data", "ce", "world", "worlds", "layers"}
+
+
 def world_name_from_pbo(pbo_path: str) -> str:
-    """Имя мира по PBO: первый компонент `prefix` из заголовка (`deerisle\\data` -> deerisle),
-    иначе имя файла. Нужно, когда карту открывают без миссии и имя брать неоткуда."""
+    """Имя мира по PBO: последний осмысленный компонент `prefix` из заголовка.
+
+    Первый компонент не годится — у модов там бывает пространство имён студии, а не карта.
+    Служебные хвосты (`data`, `ce`, …) отбрасываем. Нет префикса — берём имя файла."""
     try:
         _entries, prefix = pbo.read_header(pbo_path)
     except Exception:
         prefix = ""
-    head = prefix.replace("/", "\\").split("\\")[0].strip().lower()
-    return head or os.path.splitext(os.path.basename(pbo_path))[0].lower()
+    parts = [p for p in prefix.replace("/", "\\").split("\\") if p.strip()]
+    while parts and parts[-1].strip().lower() in _PREFIX_TAIL:
+        parts.pop()
+    name = parts[-1].strip().lower() if parts else ""
+    return name or os.path.splitext(os.path.basename(pbo_path))[0].lower()
 
 
 def unpack_pbo(pbo_path: str, world: str, world_size: float, log=print) -> str:
