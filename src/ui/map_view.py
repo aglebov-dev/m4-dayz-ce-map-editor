@@ -132,6 +132,8 @@ class MapView(QGraphicsView):
         self._brush_cursor = None
         for bl in self._bld_layers.values():
             bl["item"] = None
+        for fp in self._fp_layers.values():
+            fp["item"] = None                    # C++ объект уже убит scene().clear()
 
     def load_tiles(self, meta: TileMeta):
         """Подложка из пирамиды: статичный задник BASE_ZOOM + стриминг видимых тайлов."""
@@ -287,6 +289,8 @@ class MapView(QGraphicsView):
             self.set_marker(*self._marker_world)
         for key in self._bld_layers:
             self._apply_buildings(key)
+        for key in self._fp_layers:
+            self._apply_footprints(key)
         for key in self._terr_layers:
             self._apply_territory(key)
         self._apply_zone_labels()
