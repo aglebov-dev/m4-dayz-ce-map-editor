@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from core.i18n import tr
-from light import map_import, project as P, tiles_store, tiles_unpack
+from light import map_import, map_scan, project as P, tiles_store, tiles_unpack
 from light.sources.base import ProjectSource
 
 
@@ -93,30 +93,40 @@ class MapFileProjectSource(ProjectSource):
             self._scan()
 
     def _scan(self) -> None:
-        """Найти в папке PBO с тайлами — по содержимому, не по имени.
+        """Найти в папке и тайлы, и файлы миссии — по содержимому, не по имени.
 
-        Читаются только заголовки, поэтому папка мода на 12 ГиБ просматривается меньше
-        чем за секунду. Вложенные @Мод/Addons тоже обходим: пользователь может указать
-        как папку игры, так и корень воркшопа."""
+        Читаются только заголовки архивов, поэтому папка мода на 12 ГиБ просматривается за
+        доли секунды. Вложенные @Мод/Addons тоже обходим: можно указать корень воркшопа.
+
+        Про миссию сообщаем отдельной строкой: у большинства модов её в архивах нет вовсе
+        (экономику держит владелец сервера), а у DeerIsle лежит целиком в `ce.pbo`."""
         folder = self.folder_edit.text().strip()
         if not os.path.isdir(folder):
             self.status_label.setText(tr("src.mapfile_no_folder"))
             return
         QApplication.setOverrideCursor(QCursor(Qt.CursorShape.WaitCursor))
         try:
-            found = tiles_unpack.find_tile_pbos(folder)
-            for root, dirs, _files in os.walk(folder):
-                dirs[:] = [d for d in dirs if not d.startswith(".")]
-                if os.path.basename(root).lower() == "addons" and root != folder:
-                    found += tiles_unpack.find_tile_pbos(root)
+            findings = map_scan.scan_folder(folder)
         finally:
             QApplication.restoreOverrideCursor()
+        tiles = map_scan.tile_findings(findings)
         self.pbo_combo.clear()
-        for path in found:
-            self.pbo_combo.addItem(os.path.basename(path), path)
+        for finding in tiles:
+            self.pbo_combo.addItem(tr("src.mapfile_tiles_item", file=finding.name,
+                                      n=finding.tiles), finding.path)
         self._fill_unpacked(keep_paths=True)
-        self.status_label.setText(tr("src.mapfile_found", n=len(found))
-                                  if found else tr("src.mapfile_none"))
+
+        lines = [tr("src.mapfile_found", n=len(tiles)) if tiles else tr("src.mapfile_none")]
+        mission = [f for f in map_scan.mission_findings(findings)
+                   if f.has_areaflags or len(f.mission) > 2]   # одиночный xml — шум
+        if mission:
+            for finding in mission[:3]:
+                lines.append(tr("src.mapfile_mission", file=finding.name,
+                                n=len(finding.mission),
+                                files=", ".join(finding.mission[:4])))
+        else:
+            lines.append(tr("src.mapfile_mission_none"))
+        self.status_label.setText("\n".join(lines))
         self._sync_buttons()
 
     def _pick_pbo(self) -> None:

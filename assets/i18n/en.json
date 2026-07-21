@@ -289,5 +289,8 @@
   "src.mapfile_unpacked_item": "{world} (already unpacked)",
   "src.mapfile_done_title": "Unpack finished",
   "src.mapfile_done": "World “{world}” unpacked: background {size} m, zoom levels {zoom}; buildings — {classes} classes with footprints.",
-  "src.mapfile_no_buildings": "Buildings not collected: {err}"
+  "src.mapfile_no_buildings": "Buildings not collected: {err}",
+  "src.mapfile_tiles_item": "{file} — {n} tiles",
+  "src.mapfile_mission": "Mission files: {file} — {n} of them ({files}…)",
+  "src.mapfile_mission_none": "No mission files (areaflags.map, economy) in these archives — the server owner keeps them."
 }
