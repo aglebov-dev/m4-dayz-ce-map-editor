@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QCursor
+from PySide6.QtGui import QColor, QCursor
 from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QMessageBox,
     QPushButton, QVBoxLayout, QWidget,
@@ -114,9 +114,10 @@ class MapFileProjectSource(ProjectSource):
         for finding in tiles:
             # у модов архив почти всегда зовётся data.pbo — различать их можно только по
             # миру из префикса и по папке, откуда взят
-            self.pbo_combo.addItem(
+            self._add_map_item(
                 tr("src.mapfile_tiles_item", world=finding.world, n=finding.tiles,
-                   source=finding.source), finding.path)
+                   source=finding.source), finding.path,
+                unpacked=tiles_store.find(finding.world) is not None)
         self._fill_unpacked(keep_paths=True)
 
         lines = [tr("src.mapfile_found", n=len(tiles)) if tiles else tr("src.mapfile_none")]
@@ -152,7 +153,29 @@ class MapFileProjectSource(ProjectSource):
                    if isinstance(data, str) and os.path.isfile(data)}
         for world in tiles_store.available_worlds():
             if world not in listed:
-                self.pbo_combo.addItem(tr("src.mapfile_unpacked_item", world=world), world)
+                self._add_map_item(tr("src.mapfile_unpacked_item", world=world),
+                                   world, unpacked=True)
+
+    def _add_map_item(self, text: str, data, unpacked: bool) -> None:
+        """Строка списка карт. Распакованные помечаем галочкой и зелёным — так сразу видно,
+        что карту можно открыть, не дожидаясь распаковки."""
+        self.pbo_combo.addItem(f"✔ {text}" if unpacked else f"   {text}", data)
+        self._mark_item(self.pbo_combo.count() - 1, unpacked)
+
+    def _mark_item(self, index: int, unpacked: bool) -> None:
+        text = self.pbo_combo.itemText(index).lstrip("✔ ")
+        self.pbo_combo.setItemText(index, f"✔ {text}" if unpacked else f"   {text}")
+        self.pbo_combo.setItemData(index, QColor("#4caf50") if unpacked else None,
+                                   Qt.ItemDataRole.ForegroundRole)
+
+    def _refresh_marks(self) -> None:
+        """Пересчитать галочки — после распаковки строка найденного PBO должна её получить."""
+        for index in range(self.pbo_combo.count()):
+            data = self.pbo_combo.itemData(index)
+            if not isinstance(data, str):
+                continue
+            world = (tiles_unpack.world_name_from_pbo(data) if os.path.isfile(data) else data)
+            self._mark_item(index, tiles_store.find(world) is not None)
 
     def _on_pbo_selected(self, _index: int) -> None:
         data = self.pbo_combo.currentData()
@@ -193,6 +216,7 @@ class MapFileProjectSource(ProjectSource):
         self.status_label.setText(report)
         QMessageBox.information(self.widget, tr("src.mapfile_done_title"), report)
         self._fill_unpacked(keep_paths=True)
+        self._refresh_marks()                    # распакованная строка получает галочку
         self._sync_buttons()
 
     def _open(self) -> None:
