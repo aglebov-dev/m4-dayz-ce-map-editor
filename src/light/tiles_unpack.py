@@ -63,11 +63,23 @@ def find_tile_pbos(addons_dir: str) -> list[str]:
     return [p for p in sorted(glob.glob(os.path.join(addons_dir, "*.pbo"))) if has_tiles(p)]
 
 
+def world_name_from_pbo(pbo_path: str) -> str:
+    """Имя мира по PBO: первый компонент `prefix` из заголовка (`deerisle\\data` -> deerisle),
+    иначе имя файла. Нужно, когда карту открывают без миссии и имя брать неоткуда."""
+    try:
+        _entries, prefix = pbo.read_header(pbo_path)
+    except Exception:
+        prefix = ""
+    head = prefix.replace("/", "\\").split("\\")[0].strip().lower()
+    return head or os.path.splitext(os.path.basename(pbo_path))[0].lower()
+
+
 def unpack_pbo(pbo_path: str, world: str, world_size: float, log=print) -> str:
     """То же, но PBO указан напрямую — для модовых карт, где шаблон имени не подходит.
 
     `world` тут только имя мира проекта: под ним пирамида ложится в кэш и по нему её
-    потом находит подложка. Размер мира из PBO не достаётся, его даёт проект."""
+    потом находит подложка. `world_size=0` — миссии нет и размер неизвестен, экстрактор
+    посчитает его сам по полотну."""
     if not os.path.isfile(pbo_path):
         raise UnpackError(f"нет файла PBO: {pbo_path}")
     out = out_tiles_dir(world)

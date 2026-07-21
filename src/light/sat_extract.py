@@ -254,9 +254,23 @@ def _detect_overlap(left: np.ndarray, right: np.ndarray) -> int:
     return best if best_diff < 8 else 0
 
 
+def estimate_world_size(full_size: int, overlap: float) -> int:
+    """Прикинуть размер мира по полотну, когда взять его неоткуда (нет миссии).
+
+    Спутник идёт 1 px/м, а поле вокруг мира — половина перекрытия с каждой стороны, так что
+    `полотно - перекрытие` уже почти ответ; остаётся хвост сетки тайлов за дальним краем.
+    Округляем к кратному 256 — размеры миров кратны ему: chernarus 15360 и enoch 12800
+    попадают точно, DeerIsle 16512 садится на 16384."""
+    return int(round((full_size - overlap) / 256.0)) * 256
+
+
 def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = "",
             log=print) -> str:
-    """Распаковать PBO в пирамиду тайлов. Возвращает out_dir."""
+    """Распаковать PBO в пирамиду тайлов. Возвращает out_dir.
+
+    `world_size=0` — размер мира неизвестен (карту смотрят без миссии): считаем его из
+    полотна. На сами тайлы это не влияет, они режутся из пикселей; размер задаёт только
+    привязку к метрам в meta.json."""
     data, tiles = parse_pbo_tiles(pbo_path)
     if not tiles:
         raise ValueError("в PBO нет спутниковых тайлов layers/S_*_lco")
@@ -289,6 +303,9 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
     # равно миру только там, где поле равно перекрытию (ваниль). У DeerIsle поле 128 px
     # при перекрытии 128, и такая формула давала 1.008 px/м — картинку ужимало на 0.8%,
     # то есть на юго-востоке карты здания уезжали на сотню метров.
+    if not world_size:
+        world_size = float(estimate_world_size(full_size, overlap))
+        log(f"размер мира не задан — оценка по полотну: {world_size:.0f} м")
     ppm_raw = full_size / world_size
     ppm = min((0.25, 0.5, 1.0, 2.0, 4.0), key=lambda c: abs(c - ppm_raw))
     img = Image.fromarray(full)

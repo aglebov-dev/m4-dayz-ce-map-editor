@@ -244,6 +244,8 @@ class LightMainWindow(MainWindow):
         # ядро читает материализованную миссию; имя миссии — из config (плоская раскладка data/).
         # silent: своё понятное сообщение покажем ниже, без «миссии не найдены».
         self.load_workdir(proj.workdir, proj.mission_name, silent=True)
+        if self.areaflags is None and self._open_map_only(proj):
+            return True                          # проект-просмотрщик: подложка без миссии
         if self.areaflags is None:
             QMessageBox.warning(
                 self, "Загрузка проекта",
@@ -266,6 +268,36 @@ class LightMainWindow(MainWindow):
         return True
 
     # ---------- раскладка панелей: своя для каждого проекта ----------
+
+    def _open_map_only(self, proj: P.Project) -> bool:
+        """Открыть проект без миссии — только подложка. True, если получилось.
+
+        Такие проекты создаёт источник «карта из PBO»: `files` пуст, поэтому `apply_gating`
+        сам гасит все инструменты, а сохранять нечего. Миссию подделываем из meta.json
+        пирамиды: `load_background` ждёт объект с `world`/`world_size`."""
+        from light import tiles_store
+        from core.workspace import Mission
+
+        background = proj.background or ""
+        if not background.startswith("tiles:"):
+            return False
+        world = background.split(":", 1)[1]
+        meta = tiles_store.find(world)
+        if not meta:
+            return False
+        mission = Mission(name=world, path="", world=world,
+                          world_size=int(meta.world_size), has_areaflags=False)
+        self.load_background(mission)
+        self.lbl_af.setText(tr("af.missing"))
+        self.apply_gating()
+        self.button_save.setEnabled(False)       # править нечего — карты нет
+        self.button_bi_export.setEnabled(False)
+        self.button_snapshot.setEnabled(False)
+        self.button_folder.setEnabled(True)
+        self.button_reload.setEnabled(False)
+        self.diff_panel.set_snapshot_available(False)
+        self.setWindowTitle(f"M4 DayZ CE Map Editor — {proj.name} ({tr('src.mapfile_mode')})")
+        return True
 
     def _save_project_layout(self):
         """Сохранить раскладку панелей текущего проекта (в его layout.json)."""
@@ -455,6 +487,8 @@ class LightMainWindow(MainWindow):
         """Перестроить панель слоёв и список кисти под текущие usage/value (после
         добавления флага). Данные areaflags не трогаем — новый флаг пуст."""
         af = self.areaflags
+        if af is None:
+            return                                   # проект-просмотрщик: слоёв нет вовсе
         blocked = set(af.unwritable_usages())        # шире ячейки — кисти не отдаём
         self.layers.populate(af, tiers_on=False)     # презентер сам считает counts и цвета
         self.brush_panel.populate(

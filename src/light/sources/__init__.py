@@ -9,6 +9,7 @@ from __future__ import annotations
 from light.sources.base import Availability, ProjectSource
 from light.sources.bi import BiProjectSource
 from light.sources.folder import FolderProjectSource
+from light.sources.mapfile import MapFileProjectSource
 from light.sources.recent import RecentProjectSource
 from light.sources.sftp import SftpProjectSource
 
@@ -18,10 +19,11 @@ SOURCES: list[type[ProjectSource]] = [
     FolderProjectSource,
     SftpProjectSource,
     BiProjectSource,
+    MapFileProjectSource,
 ]
 
 __all__ = [
     "SOURCES", "ProjectSource", "Availability",
     "RecentProjectSource", "FolderProjectSource", "SftpProjectSource",
-    "BiProjectSource",
+    "BiProjectSource", "MapFileProjectSource",
 ]
