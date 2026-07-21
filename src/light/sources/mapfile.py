@@ -32,7 +32,9 @@ class MapFileProjectSource(ProjectSource):
     def build_widget(self) -> QWidget:
         self.widget = QWidget()
         layout = QVBoxLayout(self.widget)
-        layout.addWidget(QLabel(tr("src.mapfile_hint")))
+        hint = QLabel(tr("src.mapfile_hint"))
+        hint.setWordWrap(True)                   # подсказка длинная, в одну строку не влезает
+        layout.addWidget(hint)
 
         self.folder_edit = QLineEdit()
         self.folder_edit.setPlaceholderText(tr("src.mapfile_folder_ph"))
