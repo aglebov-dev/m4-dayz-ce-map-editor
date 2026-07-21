@@ -254,6 +254,11 @@ def _detect_overlap(left: np.ndarray, right: np.ndarray) -> int:
     return best if best_diff < 8 else 0
 
 
+# Разрешения спутника, что встречались или правдоподобны: у ванили 1.0 (chernarus, sakhal)
+# и 1.2 (enoch). К ближайшему из них и округляем измеренное отношение.
+_NICE_PPM = (0.25, 0.5, 0.75, 1.0, 1.2, 1.25, 1.5, 2.0, 3.0, 4.0)
+
+
 def estimate_world_size(full_size: int, overlap: float) -> int:
     """Прикинуть размер мира по полотну, когда взять его неоткуда (нет миссии).
 
@@ -297,17 +302,18 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
         full[py:py + rgb.shape[0], px:px + rgb.shape[1]] = rgb[:, :, :3]
 
     # НОРМАЛИЗАЦИЯ к 1 px/м: редактор и TileMeta считают подложку в 1 px/м, а спутник
-    # бывает и плотнее. Разрешение берём как отношение полотна к миру, округляя до
-    # «круглого» значения: поле вокруг мира — это единицы процентов, оно не должно
-    # утаскивать масштаб. Выводить масштаб из перекрытия НЕЛЬЗЯ: `полотно - перекрытие`
-    # равно миру только там, где поле равно перекрытию (ваниль). У DeerIsle поле 128 px
-    # при перекрытии 128, и такая формула давала 1.008 px/м — картинку ужимало на 0.8%,
-    # то есть на юго-востоке карты здания уезжали на сотню метров.
+    # бывает плотнее (enoch — 1.2).
     if not world_size:
         world_size = float(estimate_world_size(full_size, overlap))
         log(f"размер мира не задан — оценка по полотну: {world_size:.0f} м")
-    ppm_raw = full_size / world_size
-    ppm = min((0.25, 0.5, 1.0, 2.0, 4.0), key=lambda c: abs(c - ppm_raw))
+    # Разрешение = сколько пикселей приходится на метр. Считаем по ПОЛЕЗНОЙ части полотна
+    # (без перекрытия) и округляем к «круглому» значению: у ванильных карт отношение выходит
+    # ровным (chernarus 1.0, enoch 1.2), а у DeerIsle 1.0078 — это хвост сетки тайлов за
+    # дальним краем, и принимать его за масштаб нельзя, иначе картинку ужимает на 0.8%.
+    ppm_raw = (full_size - overlap) / world_size
+    ppm = min(_NICE_PPM, key=lambda candidate: abs(candidate - ppm_raw))
+    if abs(ppm - ppm_raw) > 0.02 * ppm_raw:      # не похоже ни на одно — верим измерению
+        ppm = ppm_raw
     img = Image.fromarray(full)
     if abs(ppm - 1.0) > 1e-3:
         final = int(round(full_size / ppm))
