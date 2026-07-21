@@ -176,10 +176,13 @@ def decode_dxt1(blocks: bytes, width: int, height: int) -> np.ndarray:
     pal[:, :, 0] = np.stack([r0, g0, bl0], -1)
     pal[:, :, 1] = np.stack([r1, g1, bl1], -1)
     gt = (c0 > c1)[..., None]
-    p2 = np.where(gt, (2 * pal[:, :, 0].astype(np.uint16) + pal[:, :, 1]) // 3,
-                  (pal[:, :, 0].astype(np.uint16) + pal[:, :, 1]) // 2).astype(np.uint8)
-    p3 = np.where(gt, (pal[:, :, 0].astype(np.uint16) + 2 * pal[:, :, 1]) // 3,
-                  0).astype(np.uint8)
+    # ОБА слагаемых расширяем до uint16 ДО умножения: `2 * pal[..., 1]` на uint8 молча
+    # переполняется (2×148 = 40), и цвет индекса 3 уезжал — на карте это выглядело как
+    # цветной мусор вдоль контрастных краёв, ~4% пикселей тайла
+    first = pal[:, :, 0].astype(np.uint16)
+    second = pal[:, :, 1].astype(np.uint16)
+    p2 = np.where(gt, (2 * first + second) // 3, (first + second) // 2).astype(np.uint8)
+    p3 = np.where(gt, (first + 2 * second) // 3, 0).astype(np.uint8)
     pal[:, :, 2] = p2
     pal[:, :, 3] = p3
     idx = (b[:, :, 4].astype(np.uint32) | (b[:, :, 5].astype(np.uint32) << 8)
