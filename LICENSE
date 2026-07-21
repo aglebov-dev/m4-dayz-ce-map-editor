@@ -38,6 +38,17 @@ Copyright (c) 2026 aglebov (aglebov.dev@gmail.com). Все права защищ
 получатель сборки вправе заменять эти библиотеки собственными версиями и совершать
 действия, необходимые для такой замены, — раздел 2 этому не препятствует.
 
+3.1. Ради осуществления этих прав отдельно и прямо разрешается:
+     - скачать исходный код программы из официального репозитория;
+     - установить собственную, в том числе изменённую, версию любой LGPL-библиотеки;
+     - собрать программу заново с такой версией (`deploy.ps1`, `src/pysidedeploy.spec`);
+     - использовать полученную сборку на тех же условиях, что и оригинальную (раздел 1);
+     - совершать обратную разработку в объёме, необходимом для отладки таких изменений.
+
+     Пункты 2.2–2.4 к этим действиям не применяются. Распространять полученную сборку
+     или изменённый код программы по-прежнему нельзя: право на пересборку даётся для
+     собственного использования и для замены LGPL-компонентов, а не для раздачи.
+
 
 4. ДАННЫЕ ИГРЫ
 
@@ -97,6 +108,13 @@ rights beyond those listed below are granted.
    licences conflict, theirs prevail. In particular PySide6 and paramiko are LGPL:
    a recipient of a build may replace those libraries with their own versions and do
    whatever that replacement requires, and Section 2 does not stand in the way.
+   To exercise those rights you are expressly permitted to download the source from
+   the official repository, install your own (including modified) build of any LGPL
+   library, rebuild the program against it, use the result under Section 1, and
+   reverse engineer as far as debugging those changes requires. Sections 2.2-2.4 do
+   not apply to any of that. Redistributing the resulting build or modified source is
+   still not permitted: the right to rebuild is for your own use and for replacing
+   LGPL components, not for handing copies out.
 
 4. GAME DATA. The program reads DayZ game files and derives data from them (tile
    pyramids, building datasets). The original assets belong to Bohemia Interactive

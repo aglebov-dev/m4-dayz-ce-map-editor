@@ -86,7 +86,10 @@ jobs:
           if ($env:GITHUB_REF -like "refs/tags/*") { $version = $env:GITHUB_REF -replace "^refs/tags/", "" }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $zip = Join-Path (Resolve-Path dist) "$env:APP_NAME $version.zip"
-          Compress-Archive -Path $exe -DestinationPath $zip -Force
+          # LICENSE и уведомления кладём в архив вместе с exe: LGPL требует сообщить
+          # получателю о своих компонентах, а раздел 3.1 лицензии -- о праве на пересборку
+          Compress-Archive -Path $exe, LICENSE, THIRD-PARTY-NOTICES.md `
+                           -DestinationPath $zip -Force
           # Отдаём только сам onefile-exe: рядом Nuitka оставляет промежуточный "_<name>.exe".
           Add-Content -Path $env:GITHUB_OUTPUT -Value "version=$version"
           Add-Content -Path $env:GITHUB_OUTPUT -Value "exe=$exe"
