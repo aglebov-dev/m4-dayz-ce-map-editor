@@ -412,23 +412,73 @@ class MainWindow(QMainWindow):
         super().closeEvent(ev)
 
     def _register_dock_button(self, dock: QDockWidget):
-        """Тогл-кнопка панели в тулбаре инструментов. ОБЯЗАТЕЛЬНО для каждой новой панели."""
+        """Тогл-кнопка панели в тулбаре инструментов. ОБЯЗАТЕЛЬНО для каждой новой панели.
+
+        Кнопку НЕ вешаем на `toggleViewAction` напрямую: в модели Qt фоновая вкладка
+        считается «видимой» (isVisible/checked = True), поэтому клик по её кнопке тогл
+        воспринимал как «скрыть» — панель не выходила вперёд, а пряталась, и появлялась
+        только со второго раза. Ведём кнопку сами: её состояние = ВИДИТ ли панель человек
+        (см. `_user_sees_dock`), клик — `_toggle_dock`."""
         if not hasattr(self, "_docks"):
             self._docks: dict[str, QDockWidget] = {}
             self._dock_state: dict[str, dict] = {}
+            self._dock_buttons: dict[str, QToolButton] = {}
         self._docks[dock.objectName()] = dock
+        act = dock.toggleViewAction()                  # берём из него только текст/enabled/подсказку
         btn = QToolButton()
-        act = dock.toggleViewAction()
-        btn.setDefaultAction(act)                       # чекается сам, синхронно с доком
+        btn.setText(act.text())
+        btn.setToolTip(act.toolTip())
+        btn.setCheckable(True)
+        btn.setChecked(self._user_sees_dock(dock))
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-        # перед скрытием запоминаем, где док жил (вкладки/область/плавание)
+        btn.clicked.connect(lambda _checked, d=dock: self._toggle_dock(d))
+        btn._toggle_action = act                       # держим ссылку: без defaultAction
+        self._dock_buttons[dock.objectName()] = btn    # обёртку QAction иначе собирает GC
+        # состояние кнопки и запоминание места — по РЕАЛЬНОЙ видимости (фон. вкладка = не видит)
         dock.visibilityChanged.connect(
-            lambda vis, d=dock: None if vis else self._remember_dock_state(d))
-        # при включении тоглом восстанавливаем состояние; не вышло — плавающим у центра
-        # (именно triggered: только клик пользователя, не программная раскладка)
-        act.triggered.connect(
-            lambda on, d=dock: self._ensure_dock_visible(d) if on else None)
+            lambda vis, d=dock, b=btn: self._on_dock_visibility(d, b, vis))
+        # гейтинг дергает act.setEnabled/ setToolTip — переносим на кнопку
+        act.changed.connect(lambda a=act, b=btn: self._sync_dock_button(a, b))
         self.tb_tools.addWidget(btn)
+
+    def _user_sees_dock(self, dock: QDockWidget) -> bool:
+        """Видит ли панель ПОЛЬЗОВАТЕЛЬ. Плавающая видимая панель — всегда да (у неё,
+        как у отдельного окна, `visibleRegion` бывает пуст, пока WM её не отрисовал).
+        Пристыкованная: пустая область отрисовки = фоновая вкладка (Qt считает её
+        «видимой», а человек её не видит) — именно этот случай и ловим."""
+        try:
+            if not dock.isVisible():
+                return False
+            return dock.isFloating() or not dock.visibleRegion().isEmpty()
+        except RuntimeError:
+            return False
+
+    def _on_dock_visibility(self, dock: QDockWidget, btn: QToolButton, vis: bool):
+        """Видимость дока сменилась (в т.ч. стал/перестал быть активной вкладкой): держим
+        кнопку в согласии с тем, что реально на экране, и запоминаем место перед скрытием."""
+        btn.setChecked(vis)                            # vis здесь = видит ли человек (фон.таб=False)
+        if not vis:
+            self._remember_dock_state(dock)
+
+    def _sync_dock_button(self, act, btn: QToolButton):
+        try:
+            btn.setEnabled(act.isEnabled())
+            btn.setToolTip(act.toolTip())
+        except RuntimeError:
+            pass                                       # действие/кнопка уже разрушены (выход)
+
+    def _toggle_dock(self, dock: QDockWidget):
+        """Клик по кнопке панели. Чёткое правило по РЕАЛЬНОМУ состоянию:
+        • человек её видит  -> спрятать;
+        • это фоновая вкладка (видима для Qt, но за другой) -> вывести вперёд;
+        • спрятана -> восстановить на прежнее место (или плавающей у центра)."""
+        if self._user_sees_dock(dock):
+            dock.hide()
+        elif dock.isVisible():                         # фоновая вкладка -> просто наверх
+            dock.raise_()
+            dock.show()
+        else:
+            self._ensure_dock_visible(dock)
 
     @trace
     def _remember_dock_state(self, dock: QDockWidget):

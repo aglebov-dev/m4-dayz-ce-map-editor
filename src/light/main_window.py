@@ -217,16 +217,10 @@ class LightMainWindow(MainWindow):
         self.layers_panel.del_flag_requested.connect(self.del_flag)
 
     def _map_dock_buttons(self):
-        """objectName -> кнопка-тогл (для блокировки инструмента)."""
-        self._dock_btn = {}
-        for w in self.tb_tools.findChildren(QToolButton):
-            act = w.defaultAction() if hasattr(w, "defaultAction") else None
-            if not act:
-                continue
-            for name, dock in self._docks.items():
-                if dock.toggleViewAction() is act:
-                    self._dock_btn[name] = w
-                    break
+        """objectName -> кнопка-тогл (для блокировки инструмента). Реестр строит база
+        (`_register_dock_button`), здесь только берём готовый — кнопки больше не
+        привязаны к toggleViewAction, по defaultAction их не найти."""
+        self._dock_btn = getattr(self, "_dock_buttons", {})
 
     # ---------- проект ----------
 
