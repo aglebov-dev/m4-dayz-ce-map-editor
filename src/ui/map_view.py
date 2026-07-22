@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 
-from PySide6.QtCore import QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QEvent, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QBrush, QColor, QImage, QPainter, QPalette, QPen, QPixmap,
 )
@@ -13,7 +13,8 @@ from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsScene, QGraphicsVie
 CLICK_SLOP_PX = 4
 
 from core.tiles import TileMeta, iter_zoom_tiles
-from ui.buildings_item import BuildingsItem, ClustersItem
+from ui.buildings_item import BuildingsItem
+from ui.footprints_item import FootprintsItem
 from ui.shape_item import GRAB_PX, ShapeItem
 from ui.territories_item import TerritoriesItem
 from ui.zone_labels_item import ZoneLabelsItem
@@ -39,8 +40,10 @@ class MapView(QGraphicsView):
     stroke_started = Signal()               # ЛКМ нажата в режиме кисти
     paint_world = Signal(float, float)      # мазок кисти в мировой точке
     stroke_finished = Signal()              # ЛКМ отпущена — мазок закончен
-    shape_committed = Signal(str, list)     # (kind, точки в мировых метрах) — залить
+    # (kind, точки в мировых метрах, угол поворота в радианах) — залить
+    shape_committed = Signal(str, list, float)
     shape_state = Signal(bool)              # есть ли контур, который можно применить
+    erase_toggle_requested = Signal()       # Tab в режиме кисти — переключить кисть/ластик
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -50,6 +53,11 @@ class MapView(QGraphicsView):
         # «рукой». Курсор везде обычный — по просьбе владельца.
         self.setDragMode(QGraphicsView.NoDrag)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
+        # Скроллбары не показываем: пан делаем вручную через setValue (диапазон есть за счёт
+        # полей PAN_MARGIN и без видимой полосы). Иначе у границы вписывания скроллбары
+        # мигают, меняют размер вьюпорта и карта «дёргается» между двумя состояниями.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setMouseTracking(True)
         # фон за пределами мира — в тон окна приложения
         self.setBackgroundBrush(self.palette().color(QPalette.ColorRole.Window))
@@ -63,14 +71,18 @@ class MapView(QGraphicsView):
         self._marker: QGraphicsEllipseItem | None = None
         self._marker_world: tuple[float, float] | None = None
         self._border = None
-        # слои зданий: key -> {"x","z","color","idx","item","visible"}
+        # слои точек зданий: key -> {"x","z","color","idx","item","visible"}
         self._bld_layers: dict[str, dict] = {}
-        self._bld_clusters: ClustersItem | None = None   # общий слой кластеров
         # территории животных: key -> {"x","z","r","color","item","visible"}
         self._terr_layers: dict[str, dict] = {}
         self._terr_opacity = 1.0
         self._bld_opacity = 1.0
         self._bld_selected: int | None = None    # глобальный индекс выделенного
+        # слои контуров зданий (footprint): key -> {"corners","idx","color","item","visible"}
+        self._fp_layers: dict[str, dict] = {}
+        self._fp_fill_opacity = 1.0              # прозрачность заливки контуров
+        self._fp_border_opacity = 1.0            # прозрачность обводки (раздельно)
+        self._fp_selected: int | None = None
         # подписи зон выбранного слоя: сами данные + состояние тогла
         self._zone_labels: ZoneLabelsItem | None = None
         self._zone_labels_args: tuple | None = None   # (zones, cell_size, color)
@@ -95,9 +107,11 @@ class MapView(QGraphicsView):
         self._drag_from = None                   # точка сцены для переноса фигуры
         # ПКМ занята паном — контекстное меню на карте не нужно
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
-        # "merged" — единые кружки (v2); "per-layer" — каждый слой в своём кружке (v1)
-        self.cluster_mode = "merged"
         self._content = None                     # QRectF карты (сцена шире на поля пана)
+        # «режим вписывания»: пока пользователь не зумил, карта следует за размером окна.
+        # Надёжнее геометрической проверки: стартовый fit до show() мог пройти при неверном
+        # размере вьюпорта — тогда карта «съезжала» в левый верхний угол до первого зума.
+        self._auto_fit = True
 
     # ---------- загрузка подложки ----------
 
@@ -119,6 +133,8 @@ class MapView(QGraphicsView):
         self._brush_cursor = None
         for bl in self._bld_layers.values():
             bl["item"] = None
+        for fp in self._fp_layers.values():
+            fp["item"] = None                    # C++ объект уже убит scene().clear()
 
     def load_tiles(self, meta: TileMeta):
         """Подложка из пирамиды: статичный задник BASE_ZOOM + стриминг видимых тайлов."""
@@ -274,6 +290,8 @@ class MapView(QGraphicsView):
             self.set_marker(*self._marker_world)
         for key in self._bld_layers:
             self._apply_buildings(key)
+        for key in self._fp_layers:
+            self._apply_footprints(key)
         for key in self._terr_layers:
             self._apply_territory(key)
         self._apply_zone_labels()
@@ -307,17 +325,20 @@ class MapView(QGraphicsView):
         if self._sel_item:
             self.scene().removeItem(self._sel_item)
             self._sel_item = None
-        if not self._sel_world:
-            return
-        x0, z0, x1, z1 = self._sel_world
-        margin = self._meta.margin if self._meta else 0
-        rect = QRectF(margin + x0, margin + (self._world_size - z1),
-                      max(1.0, x1 - x0), max(1.0, z1 - z0))
-        pen = QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine)
-        pen.setCosmetic(True)                    # 2 px на экране при любом зуме
-        self._sel_item = self.scene().addRect(rect, pen,
-                                              QBrush(QColor(255, 255, 255, 30)))
-        self._sel_item.setZValue(44)             # под рамкой карты и маркером
+        if self._sel_world:
+            x0, z0, x1, z1 = self._sel_world
+            margin = self._meta.margin if self._meta else 0
+            rect = QRectF(margin + x0, margin + (self._world_size - z1),
+                          max(1.0, x1 - x0), max(1.0, z1 - z0))
+            pen = QPen(QColor(255, 255, 255), 2, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)                # 2 px на экране при любом зуме
+            self._sel_item = self.scene().addRect(rect, pen,
+                                                  QBrush(QColor(255, 255, 255, 30)))
+            self._sel_item.setZValue(44)         # под рамкой карты и маркером
+        # рамка тянется/снимается часто, а перо косметическое: при MinimalViewportUpdate
+        # старая рамка не всегда перерисовывается (остаются «хвосты»). Полная перерисовка
+        # вьюпорта на изменение выделения убирает артефакты.
+        self.viewport().update()
 
     # ---------- кисть ----------
 
@@ -357,7 +378,7 @@ class MapView(QGraphicsView):
         s = self._shape
         if not s or s.building or s.is_degenerate():
             return
-        self.shape_committed.emit(s.kind, s.world_points())
+        self.shape_committed.emit(*s.commit_payload())
         self.cancel_shape()
 
     def has_shape(self) -> bool:
@@ -371,8 +392,17 @@ class MapView(QGraphicsView):
         self.scene().addItem(self._shape)
         return self._shape
 
+    def event(self, ev):
+        # Tab перехватываем в event(): иначе фокус-фреймворк уводит его на другой виджет
+        # до keyPressEvent. В режиме кисти Tab (и Shift+Tab) — переключить кисть/ластик.
+        if (ev.type() == QEvent.Type.KeyPress and self._brush_mode
+                and ev.key() in (Qt.Key.Key_Tab, Qt.Key.Key_Backtab)):
+            self.erase_toggle_requested.emit()
+            return True
+        return super().event(ev)
+
     def keyPressEvent(self, ev):
-        if ev.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+        if ev.key() == Qt.Key.Key_Space:         # Пробел — залить контур (вместо Enter)
             self.commit_shape()
             return
         if ev.key() == Qt.Key.Key_Escape:
@@ -444,7 +474,7 @@ class MapView(QGraphicsView):
         self.scene().addItem(item)
         self._zone_labels = item
 
-    # ---------- здания (несколько слоёв: все / по флагам) ----------
+    # ---------- здания: точки (несколько слоёв: все / по флагам) ----------
 
     def set_buildings(self, key: str, x, z, color: tuple[int, int, int], indices=None):
         """Слой точек зданий. indices — глобальные индексы инстансов (для выделения).
@@ -453,7 +483,6 @@ class MapView(QGraphicsView):
         if old and old["item"]:
             self.scene().removeItem(old["item"])
         if x is None:
-            self._rebuild_clusters()
             return
         visible = old["visible"] if old else False
         self._bld_layers[key] = {"x": x, "z": z, "color": color, "idx": indices,
@@ -472,7 +501,6 @@ class MapView(QGraphicsView):
         bl["visible"] = b
         if bl["item"]:
             bl["item"].setVisible(b)
-        self._rebuild_clusters()
 
     def set_buildings_color(self, key: str, color: tuple[int, int, int]):
         bl = self._bld_layers.get(key)
@@ -481,16 +509,13 @@ class MapView(QGraphicsView):
         bl["color"] = color
         if bl["item"]:
             bl["item"].set_color(color)
-        self._rebuild_clusters()
 
     def set_buildings_opacity(self, v: float):
-        """Общая прозрачность всех слоёв зданий (слайдер секции «Объекты»)."""
+        """Прозрачность всех слоёв точек зданий (слайдер «точки» секции «Здания»)."""
         self._bld_opacity = v
         for bl in self._bld_layers.values():
             if bl["item"]:
                 bl["item"].setOpacity(v)
-        if self._bld_clusters:
-            self._bld_clusters.setOpacity(v)
 
     def set_selected_building(self, index: int | None):
         """Подсветить отметку здания ВО ВСЕХ слоях, где оно есть (глобальный индекс)."""
@@ -498,7 +523,6 @@ class MapView(QGraphicsView):
         for bl in self._bld_layers.values():
             if bl["item"]:
                 bl["item"].set_selected(self._local_selected(bl))
-        self._rebuild_clusters()
 
     def _local_selected(self, bl: dict) -> int | None:
         """Глобальный выделенный индекс -> позиция в подслое (или None)."""
@@ -514,49 +538,85 @@ class MapView(QGraphicsView):
         if bl["item"]:
             self.scene().removeItem(bl["item"])
         margin = self._meta.margin if self._meta else 0
-        item = BuildingsItem(bl["x"], bl["z"], self._world_size, margin, bl["color"],
-                             per_layer_clusters=(self.cluster_mode == "per-layer"))
+        item = BuildingsItem(bl["x"], bl["z"], self._world_size, margin, bl["color"])
         item.setZValue(30)
         item.setVisible(bl["visible"])
         item.setOpacity(self._bld_opacity)
         item.set_selected(self._local_selected(bl))
         self.scene().addItem(item)
         bl["item"] = item
-        self._rebuild_clusters()
 
-    def _rebuild_clusters(self):
-        """Общий слой кластеров: уникальные здания ВИДИМЫХ слоёв, без дублей."""
-        import numpy as np
-        if self.cluster_mode != "merged":        # per-layer: слои рисуют кружки сами
-            if self._bld_clusters:
-                self.scene().removeItem(self._bld_clusters)
-                self._bld_clusters = None
+    # ---------- контуры зданий (footprint; фича «Здания») ----------
+
+    def set_footprints(self, key: str, corners, color: tuple[int, int, int],
+                       indices=None):
+        """Слой контуров зданий. corners — (M,4,2) мировые углы; corners=None — убрать слой."""
+        old = self._fp_layers.pop(key, None)
+        if old and old["item"]:
+            self.scene().removeItem(old["item"])
+        if corners is None:
             return
-        if self._bld_clusters is None:
-            self._bld_clusters = ClustersItem(self._world_size,
-                                              self._meta.margin if self._meta else 0)
-            self._bld_clusters.setZValue(32)
-            self._bld_clusters.setOpacity(self._bld_opacity)
-            self.scene().addItem(self._bld_clusters)
-        xs, zs, ids = [], [], []
-        for bl in self._bld_layers.values():
-            if bl["visible"] and len(bl["x"]):
-                xs.append(bl["x"])
-                zs.append(bl["z"])
-                ids.append(bl["idx"] if bl["idx"] is not None
-                           else np.arange(len(bl["x"])))
-        if not xs:
-            self._bld_clusters.set_data(np.empty(0), np.empty(0), None)
+        visible = old["visible"] if old else False
+        self._fp_layers[key] = {"corners": corners, "idx": indices,
+                                "color": color, "item": None, "visible": visible}
+        self._apply_footprints(key)
+
+    def clear_footprints(self):
+        self._fp_selected = None
+        for key in list(self._fp_layers):
+            self.set_footprints(key, None, (0, 0, 0))
+
+    def set_footprints_visible(self, key: str, b: bool):
+        fp = self._fp_layers.get(key)
+        if not fp:
             return
-        all_ids = np.concatenate(ids)
-        uniq, first = np.unique(all_ids, return_index=True)
-        ux = np.concatenate(xs)[first]
-        uz = np.concatenate(zs)[first]
-        sel = None
-        if self._bld_selected is not None:
-            pos = np.flatnonzero(uniq == self._bld_selected)
-            sel = int(pos[0]) if len(pos) else None
-        self._bld_clusters.set_data(ux, uz, sel)
+        fp["visible"] = b
+        if fp["item"]:
+            fp["item"].setVisible(b)
+
+    def set_footprints_color(self, key: str, color: tuple[int, int, int]):
+        fp = self._fp_layers.get(key)
+        if not fp:
+            return
+        fp["color"] = color
+        if fp["item"]:
+            fp["item"].set_color(color)
+
+    def set_footprints_opacity(self, v: float):
+        """Прозрачность ЗАЛИВКИ всех слоёв контуров (слайдер «заливка» секции «Здания»)."""
+        self._fp_fill_opacity = v
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].set_fill_opacity(v)
+
+    def set_footprints_border_opacity(self, v: float):
+        """Прозрачность ОБВОДКИ контуров (отдельный слайдер): чёткие рамки без заливки."""
+        self._fp_border_opacity = v
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].set_border_opacity(v)
+
+    def set_selected_footprint(self, index: int | None):
+        """Подсветить здание во всех слоях контуров (глобальный индекс инстанса)."""
+        self._fp_selected = index
+        for fp in self._fp_layers.values():
+            if fp["item"]:
+                fp["item"].set_selected(fp["item"].local_of(index))
+
+    def _apply_footprints(self, key: str):
+        fp = self._fp_layers[key]
+        if fp["item"]:
+            self.scene().removeItem(fp["item"])
+        margin = self._meta.margin if self._meta else 0
+        item = FootprintsItem(fp["corners"], self._world_size, margin, fp["color"],
+                              indices=fp["idx"])
+        item.setZValue(31)                       # над точками зданий (30), под подписями зон (40)
+        item.setVisible(fp["visible"])
+        item.set_fill_opacity(self._fp_fill_opacity)
+        item.set_border_opacity(self._fp_border_opacity)
+        item.set_selected(item.local_of(self._fp_selected))
+        self.scene().addItem(item)
+        fp["item"] = item
 
     def add_border(self):
         """Рамка по краю карты: видно, где кончаются данные, а не просто тёмное море."""
@@ -655,6 +715,7 @@ class MapView(QGraphicsView):
     def fit_all(self):
         rect = self._content if self._content is not None else self.scene().sceneRect()
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._auto_fit = True                    # карта вписана — следуем за размером окна
         self._schedule_tiles_update()
 
     def zoom_to_world(self, x0: float, z0: float, x1: float, z1: float,
@@ -671,6 +732,7 @@ class MapView(QGraphicsView):
         s = self.transform().m11()
         if s > max_scale:                        # крошечная зона — не зумим до пикселей
             self.scale(max_scale / s, max_scale / s)
+        self._auto_fit = False                   # прицельный зум — окно больше не вписывает
         self._schedule_tiles_update()
 
     def fit_all_deferred(self):
@@ -695,29 +757,36 @@ class MapView(QGraphicsView):
     def wheelEvent(self, ev):
         factor = 1.25 if ev.angleDelta().y() > 0 else 0.8
         cur = self.transform().m11()
-        if MIN_SCALE <= cur * factor <= MAX_SCALE:
-            self.scale(factor, factor)
-            self._schedule_tiles_update()
+        if not (MIN_SCALE <= cur * factor <= MAX_SCALE):
+            return
+        # Якорь зума — точка под курсором, вычисляем ВРУЧНУЮ по свежей позиции из события,
+        # а не через AnchorUnderMouse: тот сразу после открытия (вьюпорт ещё не устоялся)
+        # брал неверную позицию и карта «прыгала». Масштабируем вокруг origin (NoAnchor) и
+        # возвращаем точку под курсор тем же скроллом, что и пан.
+        cursor = ev.position().toPoint()
+        anchor_scene = self.mapToScene(cursor)   # точка карты под курсором ДО зума
+        previous_anchor = self.transformationAnchor()
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.scale(factor, factor)
+        self.setTransformationAnchor(previous_anchor)
+        shift = self.mapFromScene(anchor_scene) - cursor   # куда уехала точка
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + shift.x())
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + shift.y())
+        self._auto_fit = False                   # пользователь зумит — окно больше не вписывает
+        self._schedule_tiles_update()
 
     def scrollContentsBy(self, dx, dy):
         super().scrollContentsBy(dx, dy)
         self._schedule_tiles_update()
 
     def resizeEvent(self, ev):
-        """Вьюпорт изменился (разворот окна, открытие/закрытие панелей). Раньше трансформа
-        не менялась — при увеличении окна карта переставала вписываться (скроллбары, «съехал»
-        масштаб). Если карта была вписана целиком, держим её вписанной и после ресайза
-        (масштаб следует за окном). Если пользователь был приближён — зум не трогаем."""
-        from PySide6.QtCore import QRect
-        old = ev.oldSize()
-        refit = False
-        if (getattr(self, "_shown_once", False) and self._content is not None
-                and old.isValid() and old.width() > 0 and old.height() > 0):
-            vis = self.mapToScene(QRect(0, 0, old.width(), old.height())).boundingRect()
-            refit = (vis.width() >= self._content.width() * 0.98
-                     and vis.height() >= self._content.height() * 0.98)
+        """Вьюпорт изменился (разворот окна, открытие/закрытие панелей, ПЕРВЫЙ показ после
+        загрузки до show). В режиме вписывания (`_auto_fit`, пока пользователь не зумил)
+        держим карту вписанной и после ресайза — масштаб следует за окном. Это же чинит
+        стартовый «съезд» в левый верхний угол: первый корректный размер приходит именно
+        сюда, и мы перевписываем. Если пользователь приближён — зум не трогаем."""
         super().resizeEvent(ev)
-        if refit:
+        if self._auto_fit and self._content is not None:
             self.fit_all()
         self._schedule_tiles_update()
 
@@ -732,7 +801,8 @@ class MapView(QGraphicsView):
             self._lpan_last = self._pan_by(ev.position().toPoint(), self._lpan_last)
             return
         if self._brush_mode and self._tool != "brush":
-            if self._shape_move(sp):
+            snap = bool(ev.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+            if self._shape_move(sp, snap):       # Shift — привязка угла к шагу
                 return
         elif self._brush_mode:
             self._update_brush_cursor(sp)
@@ -771,16 +841,47 @@ class MapView(QGraphicsView):
             return
         super().mousePressEvent(ev)
 
+    def mouseDoubleClickEvent(self, ev):
+        """Двойной клик в режиме фигур: по вершине полигона — удалить её; по строящемуся
+        контуру — замкнуть его (иначе тот же клик просто задваивал бы вершину)."""
+        if (ev.button() != Qt.MouseButton.LeftButton or not self._brush_mode
+                or self._tool == "brush" or not self._shape):
+            super().mouseDoubleClickEvent(ev)
+            return
+        s, sp = self._shape, self.mapToScene(ev.position().toPoint())
+        self._drag_handle = -1                   # первый клик пары успел взяться за ручку
+        self._drag_from = None
+        if s.building:
+            if len(s.points) >= 3:
+                s.building = False
+                s.cursor = None
+                s.update()
+                self.shape_state.emit(self.has_shape())
+            return
+        i = s.handle_at(sp, self._lod())
+        if 0 <= i < s.rotate_index():
+            s.remove_point(i)
+            self.shape_state.emit(self.has_shape())
+
     def _lod(self) -> float:
         return self.transform().m11()
 
     def _shape_press(self, sp):
-        """ЛКМ в режиме фигур: ручка → тянем её; внутри → двигаем фигуру; иначе — новая."""
+        """ЛКМ в режиме фигур: ручка → тянем её; ребро полигона → новая вершина;
+        внутри → двигаем фигуру; иначе — новая фигура."""
         s = self._shape
         if s and not s.building:
             i = s.handle_at(sp, self._lod())
+            if i == s.rotate_index():            # жёлтый кружок над фигурой — поворот
+                s.begin_rotate(sp)
+                self._drag_handle = -3
+                return
             if i >= 0:
                 self._drag_handle = i
+                return
+            edge = s.edge_at(sp, self._lod())    # клик по ребру = вставить вершину и тянуть
+            if edge >= 0:
+                self._drag_handle = s.insert_point(edge, sp)
                 return
             if s.contains_point(sp):
                 self._drag_from = sp
@@ -810,11 +911,14 @@ class MapView(QGraphicsView):
         self._new_shape(self._tool, [sp, sp])    # rect / ellipse: тянем второй угол
         self._drag_handle = 4                    # правый-нижний угол
 
-    def _shape_move(self, sp) -> bool:
+    def _shape_move(self, sp, snap: bool = False) -> bool:
         """True — событие съедено (идёт правка контура)."""
         s = self._shape
         if not s:
             return False
+        if self._drag_handle == -3:              # -3: тянем ручку поворота
+            s.rotate_to(sp, snap)
+            return True
         if self._drag_handle == -2:              # лассо: копим точки траектории
             if not s.points or (abs(sp.x() - s.points[-1].x())
                                 + abs(sp.y() - s.points[-1].y())) > 2.0 / max(
@@ -841,6 +945,7 @@ class MapView(QGraphicsView):
             s.building = False
             s.cursor = None
             s.update()
+        s.end_rotate()
         self._drag_handle = -1
         self._drag_from = None
         self.shape_state.emit(self.has_shape())

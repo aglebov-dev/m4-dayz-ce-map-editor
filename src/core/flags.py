@@ -78,8 +78,11 @@ def remove_value(af: AreaFlags, name: str) -> int:
     if name not in af.values:
         raise FlagError(f"нет value-флага '{name}'")
     bit = af.values.index(name)
-    cells = int(np.count_nonzero(af.tier & np.uint8(1 << bit)))
-    af.tier = _drop_bit(af.tier, bit, 0xFF)
+    # маску строим по dtype слоя: у карт с >8 value-флагов он uint16, и np.uint8(1<<8)
+    # там просто переполнится
+    mask = af.tier.dtype.type(1 << bit)
+    cells = int(np.count_nonzero(af.tier & mask))
+    af.tier = _drop_bit(af.tier, bit, int(np.iinfo(af.tier.dtype).max))
     af.values.pop(bit)
     return cells
 

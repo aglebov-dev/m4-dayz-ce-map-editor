@@ -15,6 +15,7 @@ import shutil
 import numpy as np
 
 from core.areaflags import AreaFlags
+from core.ce_import import shift_usage_east
 from core.writer import pack
 
 
@@ -71,7 +72,9 @@ def export_project(af: AreaFlags, out_dir: str, cfglimits_src: str = "",
             f'visible="1" name="{fn}"/>')
         n_layers += 1
     for name in af.usages:
-        plane = af.plane(name)
+        # usage пишем на колонку восточнее: компилятор BI при чтении сдвигает на запад
+        # и вернёт исходный битплан (симметрично импорту, см. core.ce_import)
+        plane = shift_usage_east(af.plane(name))
         fn = f"usgFlg_{name}"
         _write_tga_gray(os.path.join(layers_dir, f"{fn}.tga"), plane)
         bit = af.usages.index(name)

@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass
@@ -12,14 +12,33 @@ class TileMeta:
     root: str            # папка мира с уровнями зума
     tile_size: int
     max_zoom: int
-    width: int           # пиксели полного зума (worldSize + 2*margin)
-    height: int
+    width: float         # сцена: единиц полного зума (worldSize + 2*margin)
+    height: float
     world_size: int      # метры
-    margin: int          # пиксели поля вокруг мира
+    margin: float        # поле вокруг мира, в единицах сцены
+    stretch: float = 1.0  # растяжение картинки: единиц сцены на пиксель пирамиды
 
     def scale_at(self, zoom: int) -> float:
-        """Во сколько раз уровень zoom мельче полного (2^(max_zoom - zoom))."""
-        return float(1 << (self.max_zoom - zoom))
+        """Во сколько единиц сцены разворачивается пиксель уровня zoom.
+
+        Пирамида нормализована на 1 px/м своего мира, а сцена меряется в метрах ТЕКУЩЕЙ
+        карты, поэтому кроме уровня учитываем и растяжение (см. `fitted_to`)."""
+        return float(1 << (self.max_zoom - zoom)) * self.stretch
+
+    def fitted_to(self, world_size: int) -> "TileMeta":
+        """Та же пирамида, натянутая на мир размером `world_size` метров.
+
+        Размер мира знает areaflags — он и есть истина. У подложки он лишь ОЦЕНЁН по
+        сетке тайлов (`sat_extract.estimate_world_size`), и оценка бывает грубее на
+        пару сотен метров. Раньше несовпадение просто отменяло подложку; вместо этого
+        растягиваем картинку на мир карты — так любая пирамида годится любой areaflags,
+        а мелкая погрешность оценки заодно уходит."""
+        if world_size <= 0 or self.world_size <= 0 or abs(world_size - self.world_size) < 1:
+            return self
+        k = world_size / self.world_size
+        return replace(self, width=self.width * k, height=self.height * k,
+                       margin=self.margin * k, world_size=world_size,
+                       stretch=self.stretch * k)
 
     def world_to_px(self, x: float, z: float) -> tuple[float, float]:
         """Мир (x, z; z на север) -> пиксель полного зума (y вниз, север сверху)."""
@@ -40,7 +59,7 @@ class TileMeta:
         """Уровень пирамиды под масштаб вью (screen px / scene px): ~1 px тайла на px экрана."""
         if view_scale <= 0:
             return 0
-        z = round(self.max_zoom + math.log2(view_scale))
+        z = round(self.max_zoom + math.log2(view_scale * self.stretch))
         return max(0, min(self.max_zoom, z))
 
     def tiles_in_rect(self, zoom: int, left: float, top: float,

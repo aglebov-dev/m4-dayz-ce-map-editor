@@ -176,10 +176,13 @@ def decode_dxt1(blocks: bytes, width: int, height: int) -> np.ndarray:
     pal[:, :, 0] = np.stack([r0, g0, bl0], -1)
     pal[:, :, 1] = np.stack([r1, g1, bl1], -1)
     gt = (c0 > c1)[..., None]
-    p2 = np.where(gt, (2 * pal[:, :, 0].astype(np.uint16) + pal[:, :, 1]) // 3,
-                  (pal[:, :, 0].astype(np.uint16) + pal[:, :, 1]) // 2).astype(np.uint8)
-    p3 = np.where(gt, (pal[:, :, 0].astype(np.uint16) + 2 * pal[:, :, 1]) // 3,
-                  0).astype(np.uint8)
+    # ОБА слагаемых расширяем до uint16 ДО умножения: `2 * pal[..., 1]` на uint8 молча
+    # переполняется (2×148 = 40), и цвет индекса 3 уезжал — на карте это выглядело как
+    # цветной мусор вдоль контрастных краёв, ~4% пикселей тайла
+    first = pal[:, :, 0].astype(np.uint16)
+    second = pal[:, :, 1].astype(np.uint16)
+    p2 = np.where(gt, (2 * first + second) // 3, (first + second) // 2).astype(np.uint8)
+    p3 = np.where(gt, (first + 2 * second) // 3, 0).astype(np.uint8)
     pal[:, :, 2] = p2
     pal[:, :, 3] = p3
     idx = (b[:, :, 4].astype(np.uint32) | (b[:, :, 5].astype(np.uint32) << 8)
@@ -235,22 +238,65 @@ def decode_paa(data: bytes) -> np.ndarray:
 # ---------- склейка + пирамида ----------
 
 def _detect_overlap(left: np.ndarray, right: np.ndarray) -> int:
-    """Перекрытие соседних тайлов: правый край левого ≈ левый край правого."""
+    """Перекрытие соседних тайлов: правый край левого ≈ левый край правого.
+
+    Перебираем до половины тайла: у ванильных карт перекрытие мелкое, у модовых бывает
+    крупное (DeerIsle — 128 px при тайле 512). Слишком короткий перебор возвращает 0, и
+    тайлы кладутся с шагом во всю ширину — по карте идёт двоение на каждом стыке.
+    При равном совпадении берём ШИРОКОЕ: на однородной воде совпадает любая ширина, а
+    настоящее перекрытие даёт нулевую разницу и на текстуре."""
     h, w, _ = left.shape
     best, best_diff = 0, 1e18
     li = left.astype(np.int32); ri = right.astype(np.int32)
-    for cand in range(1, 65):
+    for cand in range(1, w // 2 + 1):
         l = li[::7, w - cand:w, :3]
         r = ri[::7, 0:cand, :3]
         diff = np.abs(l - r).sum() / (l.size or 1)
-        if diff < best_diff:
+        if diff <= best_diff:
             best_diff, best = diff, cand
     return best if best_diff < 8 else 0
 
 
+# Разрешения спутника, что встречались или правдоподобны: у ванили 1.0 (chernarus, sakhal)
+# и 1.2 (enoch). К ближайшему из них и округляем измеренное отношение.
+_NICE_PPM = (0.25, 0.5, 0.75, 1.0, 1.2, 1.25, 1.5, 2.0, 3.0, 4.0)
+
+
+def _full_size_pair(by_pos, tile_rgb, tw: int, th: int, gw: int, gh: int):
+    """Пара соседей по горизонтали, оба полноразмерные — на них меряется перекрытие.
+
+    Центральная пара не годится вслепую: если хоть один сосед оказался однотонным мипом,
+    перекрытие измерить не по чему. Идём от центра наружу — там обычно суша с текстурой."""
+    order = sorted(range(gw - 1), key=lambda x: abs(x - gw // 2))
+    for y in sorted(range(gh), key=lambda v: abs(v - gh // 2)):
+        for x in order:
+            if (x, y) not in by_pos or (x + 1, y) not in by_pos:
+                continue
+            left, right = tile_rgb(x, y), tile_rgb(x + 1, y)
+            if left.shape[:2] == (th, tw) and right.shape[:2] == (th, tw):
+                return left, right
+    return None
+
+
+def estimate_world_size(full_size: int, overlap: float) -> int:
+    """Прикинуть размер мира по полотну, когда взять его неоткуда (нет миссии).
+
+    Спутник идёт 1 px/м, а поле вокруг мира — половина перекрытия с каждой стороны, так что
+    `полотно - перекрытие` уже почти ответ; остаётся хвост сетки тайлов за дальним краем.
+    Округляем ВНИЗ к кратному 256: размеры миров кратны ему, а хвост сетки только добавляет
+    лишнее — вверх округлять нельзя, мир получился бы шире собственной подложки (Antoria:
+    20640 -> 20480, а не 20736). chernarus 15360 и enoch 15360 при 1 px/м попадают точно,
+    DeerIsle 16512 садится на 16384."""
+    return int((full_size - overlap) // 256) * 256
+
+
 def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = "",
             log=print) -> str:
-    """Распаковать PBO в пирамиду тайлов. Возвращает out_dir."""
+    """Распаковать PBO в пирамиду тайлов. Возвращает out_dir.
+
+    `world_size=0` — размер мира неизвестен (карту смотрят без миссии): считаем его из
+    полотна. На сами тайлы это не влияет, они режутся из пикселей; размер задаёт только
+    привязку к метрам в meta.json."""
     data, tiles = parse_pbo_tiles(pbo_path)
     if not tiles:
         raise ValueError("в PBO нет спутниковых тайлов layers/S_*_lco")
@@ -258,37 +304,66 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
     gh = max(t[1] for t in tiles) + 1
     log(f"тайлов {len(tiles)}, сетка {gw}×{gh}")
 
+    by_pos = {(x, y): (o, s) for x, y, o, s in tiles}
+
     def tile_rgb(x, y):
-        off, size = next((o, s) for tx, ty, o, s in tiles if tx == x and ty == y)
+        off, size = by_pos[(x, y)]
         return decode_paa(data[off:off + size])
 
-    center = tile_rgb(gw // 2, gh // 2)
-    tw, th = center.shape[1], center.shape[0]
-    overlap = _detect_overlap(center, tile_rgb(gw // 2 + 1, gh // 2))
+    # Размер тайла берём по МАКСИМУМУ, а не по центральному: однотонные тайлы (сплошная
+    # вода) игра хранит крошечным мипом — у Antoria 81 такой тайл размером 4×4 px. Если
+    # принять его за размер сетки или вставить как есть, в полотне остаются чёрные дыры.
+    sample = [tile_rgb(x, y) for x, y in list(by_pos)[:: max(1, len(by_pos) // 24)]]
+    th, tw = max((s.shape[0] for s in sample)), max((s.shape[1] for s in sample))
+
+    pair = _full_size_pair(by_pos, tile_rgb, tw, th, gw, gh)
+    overlap = _detect_overlap(*pair) if pair else 0
     step = tw - overlap
     full_size = step * (gw - 1) + tw
     log(f"тайл {tw}×{th}, перекрытие {overlap}px, полотно {full_size}×{full_size}")
 
     full = np.zeros((full_size, full_size, 3), dtype=np.uint8)
-    by_pos = {(x, y): (o, s) for x, y, o, s in tiles}
+    small = 0
     for (x, y), (off, size) in by_pos.items():
-        rgb = decode_paa(data[off:off + size])
+        rgb = decode_paa(data[off:off + size])[:, :, :3]
+        if rgb.shape[0] != th or rgb.shape[1] != tw:
+            rgb = np.asarray(Image.fromarray(rgb).resize((tw, th), Image.NEAREST))
+            small += 1
         px, py = x * step, y * step
-        full[py:py + rgb.shape[0], px:px + rgb.shape[1]] = rgb[:, :, :3]
+        full[py:py + th, px:px + tw] = rgb
+    if small:
+        log(f"растянуто до {tw}×{th}: {small} однотонных тайлов (в PBO лежат мелким мипом)")
 
-    # НОРМАЛИЗАЦИЯ к 1 px/м: у некоторых миров спутник не 1 px/м (Enoch — 1.2),
-    # а редактор/TileMeta считают 1 px/м. Ужимаем полотно так, чтобы worldSize метров
-    # занимал (final - overlap_m) пикселей при 1 px/м — тогда подложка и оверлей флагов
-    # совпадают на любом мире.
-    ppm = (full_size - overlap) / world_size
+    # НОРМАЛИЗАЦИЯ к 1 px/м: редактор и TileMeta считают подложку в 1 px/м, а спутник
+    # бывает плотнее (enoch — 1.2).
+    if not world_size:
+        world_size = float(estimate_world_size(full_size, overlap))
+        log(f"размер мира не задан — оценка по полотну: {world_size:.0f} м")
+    # Разрешение = сколько пикселей приходится на метр. Считаем по ПОЛЕЗНОЙ части полотна
+    # (без перекрытия) и округляем к «круглому» значению: у ванильных карт отношение выходит
+    # ровным (chernarus 1.0, enoch 1.2), а у DeerIsle 1.0078 — это хвост сетки тайлов за
+    # дальним краем, и принимать его за масштаб нельзя, иначе картинку ужимает на 0.8%.
+    ppm_raw = (full_size - overlap) / world_size
+    ppm = min(_NICE_PPM, key=lambda candidate: abs(candidate - ppm_raw))
+    if abs(ppm - ppm_raw) > 0.02 * ppm_raw:      # не похоже ни на одно — верим измерению
+        ppm = ppm_raw
     img = Image.fromarray(full)
     if abs(ppm - 1.0) > 1e-3:
-        overlap_m = overlap / ppm                 # физическое перекрытие в метрах
-        final = int(round(world_size + overlap_m))
+        final = int(round(full_size / ppm))
         img = img.resize((final, final))
         full_size = final
-        overlap = overlap_m
-        log(f"нормализация 1 px/м: {ppm:.3f} px/м → полотно {final}×{final}")
+        overlap = overlap / ppm
+        log(f"нормализация 1 px/м: {ppm_raw:.3f} px/м → полотно {final}×{final}")
+    # Поле вокруг мира = половина перекрытия: спутник выходит за террейн на полтайла
+    # стыка с каждой стороны. Считать его как (полотно - мир)/2 нельзя — полотно кратно
+    # шагу тайла и с дальнего края торчит лишнее (DeerIsle: 43 тайла = 16640 px при мире
+    # 16384 + 128, то есть 192 px хвоста), от чего подложка съезжает на десятки метров.
+    margin = overlap / 2.0
+    tail = full_size - world_size - overlap          # хвост за дальним краем мира
+    if tail < -1:
+        log(f"внимание: полотно {full_size} меньше мира {world_size:.0f} м с полем")
+    elif tail > 1:
+        log(f"полотно шире мира на {tail:.0f} px — хвост сетки тайлов за дальним краем")
 
     os.makedirs(out_dir, exist_ok=True)
     out_tile = 256
@@ -320,7 +395,7 @@ def extract(pbo_path: str, out_dir: str, world_size: float, world_name: str = ""
         "name": world_name or os.path.basename(out_dir),
         "tileSize": out_tile, "maxZoom": max_zoom,
         "width": full_size, "height": full_size, "worldSize": world_size,
-        "margin": overlap / 2.0, "pixelsPerMeter": (full_size - overlap) / world_size,
+        "margin": margin, "pixelsPerMeter": 1.0,
     }
     with open(os.path.join(out_dir, "meta.json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
